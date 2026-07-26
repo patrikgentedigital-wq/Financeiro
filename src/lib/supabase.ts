@@ -4,8 +4,13 @@ import { Transaction } from '../types';
 // ============================================================================
 // CONFIGURAÇÃO DO SUPABASE (VIA VARIÁVEIS DE AMBIENTE)
 // ============================================================================
-export const SUPABASE_URL = (import.meta.env.VITE_SUPABASE_URL as string) || '';
-export const SUPABASE_ANON_KEY = (import.meta.env.VITE_SUPABASE_ANON_KEY as string) || '';
+export const SUPABASE_URL =
+  (import.meta.env.VITE_SUPABASE_URL as string) ||
+  'https://litugojwlmlvmtrmflgg.supabase.co';
+
+export const SUPABASE_ANON_KEY =
+  (import.meta.env.VITE_SUPABASE_ANON_KEY as string) ||
+  'sb_publishable_bAcWwUKh8ofeGgL5HpY0FQ_viStzsBd';
 
 export const isSupabaseConfigured =
   Boolean(SUPABASE_URL) &&
