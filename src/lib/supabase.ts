@@ -10,7 +10,7 @@ export const SUPABASE_URL =
 
 export const SUPABASE_ANON_KEY =
   (import.meta.env.VITE_SUPABASE_ANON_KEY as string) ||
-  'sb_publishable_bAcWwUKh8ofeGgL5HpY0FQ_viStzsBd';
+  'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImxpdHVnb2p3bG1sdm10cm1mbGdnIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODQyOTQyNTAsImV4cCI6MjA5OTg3MDI1MH0.8kf2Zpl3QN05CxnqHEXmiIGXUxk-mvOJpNExTATRs2Y';
 
 export const isSupabaseConfigured =
   Boolean(SUPABASE_URL) &&
