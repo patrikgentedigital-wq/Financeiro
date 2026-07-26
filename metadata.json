@@ -1,0 +1,6 @@
+{
+  "name": "Finanças do Casal",
+  "description": "Gestão e controle financeiro compartilhado para casais com visão geral de saldos, orçamento e planejamento de metas.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
