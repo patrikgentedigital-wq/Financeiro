@@ -146,3 +146,26 @@ export function getSixMonthHistory(transactions: Transaction[]): MonthlyHistoryI
     Despesas: roundCurrency(m.Despesas),
   }));
 }
+
+/**
+ * Calculates current accumulated savings dynamically from transactions under 'Investimentos' or 'Poupança'
+ */
+export function calculateSavingsGoalProgress(transactions: Transaction[], baseCurrentAmount: number = 0): number {
+  let accumulated = baseCurrentAmount;
+
+  transactions.forEach((t) => {
+    const categoryLower = (t.category || '').toLowerCase();
+    if (categoryLower.includes('invest') || categoryLower.includes('poup')) {
+      const amt = Math.abs(Number(t.amount) || 0);
+      if (t.type === 'receita') {
+        accumulated += amt;
+      } else {
+        // Se for despesa de investimento (ex: aporte enviado para poupança), soma ao acumulado
+        accumulated += amt;
+      }
+    }
+  });
+
+  return roundCurrency(accumulated);
+}
+

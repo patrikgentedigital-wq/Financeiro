@@ -7,7 +7,18 @@
 ALTER TABLE public.transactions 
   ALTER COLUMN amount TYPE NUMERIC(12,2) USING ROUND(amount::NUMERIC, 2);
 
--- 2. Adiciona coluna de controle de versão para evitar Race Conditions (OCC)
+-- 2. Normalização de dados históricos para tipo 'receita' e 'despesa'
+UPDATE public.transactions SET type = 'receita' WHERE type = 'income';
+UPDATE public.transactions SET type = 'despesa' WHERE type = 'expense';
+
+-- 3. Adiciona constraint estrita de tipo
+ALTER TABLE public.transactions 
+DROP CONSTRAINT IF EXISTS check_type_valid;
+
+ALTER TABLE public.transactions 
+ADD CONSTRAINT check_type_valid CHECK (type IN ('receita', 'despesa'));
+
+-- 4. Adiciona coluna de controle de versão para evitar Race Conditions (OCC)
 DO $$ 
 BEGIN 
     IF NOT EXISTS (
@@ -18,7 +29,7 @@ BEGIN
     END IF;
 END $$;
 
--- 3. Tabela de Auditoria Histórica (Audit Log)
+-- 5. Tabela de Auditoria Histórica (Audit Log)
 CREATE TABLE IF NOT EXISTS public.transactions_audit_log (
     audit_id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
     transaction_id TEXT NOT NULL,
@@ -29,7 +40,7 @@ CREATE TABLE IF NOT EXISTS public.transactions_audit_log (
     changed_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
 );
 
--- 4. Habilita RLS na Tabela de Auditoria
+-- 6. Habilita RLS na Tabela de Auditoria
 ALTER TABLE public.transactions_audit_log ENABLE ROW LEVEL SECURITY;
 
 DROP POLICY IF EXISTS "Usuários podem ver auditoria de suas próprias transações" ON public.transactions_audit_log;
@@ -37,7 +48,7 @@ CREATE POLICY "Usuários podem ver auditoria de suas próprias transações"
 ON public.transactions_audit_log FOR SELECT 
 USING (auth.uid() = changed_by);
 
--- 5. Trigger Function para gravação de auditoria automática
+-- 7. Trigger Function para gravação de auditoria automática
 CREATE OR REPLACE FUNCTION public.process_transaction_audit()
 RETURNS TRIGGER AS $$
 BEGIN
@@ -54,7 +65,7 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql SECURITY DEFINER;
 
--- 6. Associação da Trigger na Tabela Transactions
+-- 8. Associação da Trigger na Tabela Transactions
 DROP TRIGGER IF EXISTS trg_audit_transactions ON public.transactions;
 CREATE TRIGGER trg_audit_transactions
 AFTER UPDATE OR DELETE ON public.transactions

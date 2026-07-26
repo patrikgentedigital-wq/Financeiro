@@ -19,14 +19,18 @@ export const supabase = isSupabaseConfigured
   : null;
 
 // ============================================================================
-// HELPER PARA SANITIZAÇÃO, PRECISÃO MONETÁRIA E ARREDONDAMENTO
+// HELPER PARA SANITIZAÇÃO, PRECISÃO MONETÁRIA E NORMALIZAÇÃO DE TIPOS
 // ============================================================================
 function sanitizeAndValidateTx(tx: Partial<Transaction>): { valid: boolean; data?: any; error?: string } {
   const description = (tx.description || '').trim().slice(0, 255);
   // Garante arredondamento exato em duas casas decimais no nível do JS para evitar IEEE 754 float drift
   const rawAmount = Math.abs(Number(tx.amount));
   const amount = Math.round(rawAmount * 100) / 100;
-  const type = tx.type === 'receita' ? 'receita' : 'despesa';
+  
+  // Normalização estrita de tipo (Pontos 9)
+  const rawType = (tx.type || '').toLowerCase();
+  const type = rawType === 'receita' || rawType === 'income' ? 'receita' : 'despesa';
+
   const category = (tx.category || 'Outros').trim().slice(0, 100);
   const isShared = Boolean(tx.isShared);
   const paidBy = (tx.paidBy || 'Casal').trim().slice(0, 100);
@@ -52,14 +56,14 @@ function sanitizeAndValidateTx(tx: Partial<Transaction>): { valid: boolean; data
       category,
       is_shared: isShared,
       paid_by: paidBy,
-      version: currentVersion + (tx.version ? 1 : 0), // Incrementa versão na edição para OCC
+      version: currentVersion + 1, // Nova versão esperada
       updated_at: new Date().toISOString(),
     },
   };
 }
 
 // ============================================================================
-// SUPABASE AUTH HELPERS
+// SUPABASE AUTH HELPERS (SEM FALLBACK FALSO)
 // ============================================================================
 export async function signUpUser(email: string, password: string, name?: string) {
   if (!supabase) {
@@ -101,27 +105,28 @@ export async function signOutUser() {
 }
 
 // ============================================================================
-// SUPABASE DATA HELPERS (COM PRECISÃO NUMÉRICA E VERSIONEAMENTO OCC)
+// SUPABASE DATA HELPERS (PAGINAÇÃO, REAL OCC E NORMALIZAÇÃO ESTRITA)
 // ============================================================================
 
-// Helper to fetch active transactions from Supabase securely
-export async function fetchTransactionsFromSupabase(): Promise<Transaction[] | null> {
+// Helper to fetch active transactions with pagination support (Ponto 6)
+export async function fetchTransactionsFromSupabase(page: number = 1, limit: number = 100): Promise<Transaction[] | null> {
   if (!supabase) return null;
   try {
     const { data: userData } = await supabase.auth.getUser();
     const userId = userData?.user?.id;
 
-    let query = supabase
+    if (!userId) return null; // Exige usuário autenticado para RLS estrito (Ponto 2)
+
+    const from = (page - 1) * limit;
+    const to = from + limit - 1;
+
+    const { data, error } = await supabase
       .from('transactions')
       .select('id, date, description, amount, type, category, is_shared, paid_by, user_id, is_deleted, version')
+      .eq('user_id', userId) // RLS estrito: apenas linhas do proprietário (Ponto 2)
       .or('is_deleted.eq.false,is_deleted.is.null')
-      .order('date', { ascending: false });
-
-    if (userId) {
-      query = query.or(`user_id.eq.${userId},user_id.is.null`);
-    }
-
-    const { data, error } = await query;
+      .order('date', { ascending: false })
+      .range(from, to); // Paginação de banco de dados (Ponto 6)
 
     if (error) {
       console.warn('Falha ao carregar dados remotos do Supabase.');
@@ -131,18 +136,24 @@ export async function fetchTransactionsFromSupabase(): Promise<Transaction[] | n
     if (data && data.length > 0) {
       return data
         .filter((item: any) => !item.is_deleted)
-        .map((item: any) => ({
-          id: String(item.id),
-          date: item.date,
-          description: item.description,
-          amount: Math.round(Math.abs(Number(item.amount)) * 100) / 100, // Arredondamento monetário exato
-          type: item.type === 'income' || item.type === 'receita' ? 'receita' : 'despesa',
-          category: item.category || 'Outros',
-          isShared: item.is_shared ?? true,
-          paidBy: item.paid_by || 'Casal',
-          isDeleted: Boolean(item.is_deleted),
-          version: Number(item.version) || 1,
-        }));
+        .map((item: any) => {
+          // Normalização estrita de tipo (Ponto 9)
+          const rawType = (item.type || '').toLowerCase();
+          const normalizedType = rawType === 'income' || rawType === 'receita' ? 'receita' : 'despesa';
+
+          return {
+            id: String(item.id),
+            date: item.date,
+            description: item.description,
+            amount: Math.round(Math.abs(Number(item.amount)) * 100) / 100, // Arredondamento exato
+            type: normalizedType,
+            category: item.category || 'Outros',
+            isShared: item.is_shared ?? true,
+            paidBy: item.paid_by || 'Casal',
+            isDeleted: Boolean(item.is_deleted),
+            version: Number(item.version) || 1,
+          };
+        });
     }
   } catch (err) {
     console.warn('Falha na comunicação de rede com o banco de dados.');
@@ -150,7 +161,7 @@ export async function fetchTransactionsFromSupabase(): Promise<Transaction[] | n
   return null;
 }
 
-// Helper to save or sync transaction to Supabase with input validation & OCC versioning
+// Helper to save or update transaction with REAL OCC Concurrency Verification (Ponto 1)
 export async function saveTransactionToSupabase(tx: Transaction): Promise<boolean> {
   if (!supabase) return false;
   try {
@@ -163,17 +174,48 @@ export async function saveTransactionToSupabase(tx: Transaction): Promise<boolea
     const { data: userData } = await supabase.auth.getUser();
     const userId = userData?.user?.id;
 
+    if (!userId) return false;
+
+    const expectedVersion = tx.version || 1;
     const payload = {
       ...validation.data,
       is_deleted: false,
-      ...(userId ? { user_id: userId } : {}),
+      user_id: userId,
     };
 
-    const { error } = await supabase.from('transactions').upsert([payload]);
-    if (error) {
-      console.warn('Falha na atualização de transação remota.');
-      return false;
+    // Se a transação já existe, fazemos UPDATE com verificação estrita da versão anterior (REAL OCC)
+    const { data: existing } = await supabase
+      .from('transactions')
+      .select('id, version')
+      .eq('id', tx.id)
+      .maybeSingle();
+
+    if (existing) {
+      // OCC CHECK: Se a versão no banco não for exatamente a versão que o cliente carregou, rejeita!
+      if (Number(existing.version) !== expectedVersion) {
+        console.warn(`[OCC CONFLICT] A transação ${tx.id} foi alterada por outro usuário (versão no banco: ${existing.version}, versão local: ${expectedVersion}). Alteração rejeitada.`);
+        return false;
+      }
+
+      const { error, count } = await supabase
+        .from('transactions')
+        .update(payload)
+        .eq('id', tx.id)
+        .eq('version', expectedVersion); // Verificação OCC no WHERE
+
+      if (error || (count !== null && count === 0)) {
+        console.warn('[OCC CONFLICT] Falha ao atualizar transação concorrente.');
+        return false;
+      }
+    } else {
+      // Nova transação (INSERT)
+      const { error } = await supabase.from('transactions').insert([payload]);
+      if (error) {
+        console.warn('Falha na inserção da transação remota.');
+        return false;
+      }
     }
+
     return true;
   } catch (err) {
     console.warn('Erro ao processar envio de dados.');
@@ -188,19 +230,20 @@ export async function deleteTransactionFromSupabase(id: string): Promise<boolean
     const { data: userData } = await supabase.auth.getUser();
     const userId = userData?.user?.id;
 
+    if (!userId) return false;
+
     const updatePayload = {
       is_deleted: true,
       deleted_at: new Date().toISOString(),
       updated_at: new Date().toISOString(),
     };
 
-    let query = supabase.from('transactions').update(updatePayload).eq('id', id);
+    const { error } = await supabase
+      .from('transactions')
+      .update(updatePayload)
+      .eq('id', id)
+      .eq('user_id', userId); // RLS / IDOR check
 
-    if (userId) {
-      query = query.eq('user_id', userId);
-    }
-
-    const { error } = await query;
     if (error) {
       console.warn('Falha no arquivamento seguro da transação remota.');
       return false;

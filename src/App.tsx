@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import { ViewMode, Transaction, UserProfile, ToastNotification } from './types';
 import { INITIAL_USER, INITIAL_TRANSACTIONS } from './data/initialData';
 import {
@@ -18,6 +18,7 @@ import { SettingsView } from './components/SettingsView';
 import { LoginView } from './components/LoginView';
 import { NewTransactionModal } from './components/NewTransactionModal';
 import { ToastContainer } from './components/ToastContainer';
+import { calculateSavingsGoalProgress } from './utils/calculations';
 
 export function App() {
   // Load saved user profile or fallback
@@ -177,7 +178,11 @@ export function App() {
   const handleLogout = async () => {
     await signOutUser();
     setIsAuthenticated(false);
+    // Limpeza completa do localStorage no logout (Pontos 3 e 8)
     localStorage.removeItem('financas_casal_user');
+    localStorage.removeItem('financas_casal_txs');
+    localStorage.removeItem('financas_casal_theme');
+    setTransactions([]);
     addToast('info', 'Sessão encerrada com sucesso.');
   };
 
@@ -189,11 +194,12 @@ export function App() {
     }
   };
 
-  // Add new transaction
+  // Add new transaction using Crypto.randomUUID() (Ponto 4)
   const handleAddTransaction = async (newTxData: Omit<Transaction, 'id'>) => {
     const newTx: Transaction = {
       ...newTxData,
-      id: `tx-${Date.now()}`,
+      id: typeof crypto !== 'undefined' && crypto.randomUUID ? crypto.randomUUID() : `tx-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`,
+      version: 1,
     };
 
     setTransactions((prev) => [newTx, ...prev]);
@@ -203,7 +209,7 @@ export function App() {
     const typeLabel = newTx.type === 'receita' ? 'Receita' : 'Despesa';
 
     if (isSupabaseConfigured && !savedOnCloud) {
-      addToast('info', `✨ ${typeLabel} "${newTx.description}" salva localmente (falha na nuvem).`);
+      addToast('info', `✨ ${typeLabel} "${newTx.description}" salva localmente (falha na nuvem ou conflito).`);
     } else {
       addToast(
         'success',
@@ -262,13 +268,26 @@ export function App() {
     return <LoginView onLogin={handleLogin} />;
   }
 
+  // Dynamic user profile calculation with real savings goal progress (Ponto 7)
+  const activeUser: UserProfile = useMemo(() => {
+    if (!user.savingsGoal) return user;
+    const dynamicCurrent = calculateSavingsGoalProgress(transactions);
+    return {
+      ...user,
+      savingsGoal: {
+        ...user.savingsGoal,
+        currentAmount: dynamicCurrent,
+      },
+    };
+  }, [user, transactions]);
+
   return (
     <div className="min-h-screen bg-[#0f0c1b] text-white selection:bg-purple-500 selection:text-white font-['Inter',sans-serif]">
       {/* Navigation Bar */}
       <Navigation
         currentView={currentView}
         onNavigate={setCurrentView}
-        user={user}
+        user={activeUser}
         onOpenNewTransaction={() => {
           setEditingTransaction(null);
           setIsNewTxModalOpen(true);
@@ -284,7 +303,7 @@ export function App() {
       <main className="pt-24 pb-20 md:pb-12 max-w-7xl mx-auto px-4 sm:px-6 md:px-8">
         {currentView === 'dashboard' && (
           <DashboardView
-            user={user}
+            user={activeUser}
             transactions={transactions}
             onNavigate={setCurrentView}
             onOpenNewTransaction={() => {

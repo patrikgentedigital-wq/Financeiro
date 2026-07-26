@@ -1,9 +1,9 @@
 -- ============================================================================
--- SCRIPT DE CONFIGURAÇÃO DE SEGURANÇA, RLS E SOFT DELETE NO SUPABASE
+-- SCRIPT DE CONFIGURAÇÃO DE SEGURANÇA E RLS NO SUPABASE (TABELA TRANSACTIONS)
 -- Executar no SQL Editor do seu Dashboard Supabase
 -- ============================================================================
 
--- 1. Garante que a coluna user_id exista e esteja vinculada a auth.users
+-- 1. Garante que a coluna user_id exista e esteja vinculada a auth.users (NOT NULL)
 DO $$ 
 BEGIN 
     IF NOT EXISTS (
@@ -52,10 +52,10 @@ DROP POLICY IF EXISTS "Usuários podem inserir suas próprias transações" ON p
 DROP POLICY IF EXISTS "Usuários podem atualizar suas próprias transações" ON public.transactions;
 DROP POLICY IF EXISTS "Usuários podem deletar suas próprias transações" ON public.transactions;
 
--- 5. Cria Políticas de Segurança RLS (Leitura, Inserção, Atualização, Deleção)
+-- 5. Cria Políticas de Segurança RLS Estritas (Isolamento Total por user_id)
 CREATE POLICY "Usuários podem ver suas próprias transações" 
 ON public.transactions FOR SELECT 
-USING ((auth.uid() = user_id OR user_id IS NULL) AND (is_deleted IS FALSE OR is_deleted IS NULL));
+USING (auth.uid() = user_id AND (is_deleted IS FALSE OR is_deleted IS NULL));
 
 CREATE POLICY "Usuários podem inserir suas próprias transações" 
 ON public.transactions FOR INSERT 
@@ -81,4 +81,4 @@ ALTER TABLE public.transactions
 DROP CONSTRAINT IF EXISTS check_type_valid;
 
 ALTER TABLE public.transactions 
-ADD CONSTRAINT check_type_valid CHECK (type IN ('receita', 'despesa', 'income', 'expense'));
+ADD CONSTRAINT check_type_valid CHECK (type IN ('receita', 'despesa'));
