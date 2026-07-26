@@ -1,19 +1,14 @@
 import React, { useState } from 'react';
-import { signUpUser, signInUser, isSupabaseConfigured } from '../lib/supabase';
+import { signInUser, isSupabaseConfigured } from '../lib/supabase';
 
 interface LoginViewProps {
   onLogin: (email: string, name?: string) => void;
 }
 
 export const LoginView: React.FC<LoginViewProps> = ({ onLogin }) => {
-  const [authMode, setAuthMode] = useState<'login' | 'register'>('login');
-  
-  // Form fields
-  const [name, setName] = useState('');
+  // Form fields (Apenas Login)
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
-  const [confirmPassword, setConfirmPassword] = useState('');
-  
   const [showPassword, setShowPassword] = useState(false);
   const [rememberMe, setRememberMe] = useState(true);
   const [isLoading, setIsLoading] = useState(false);
@@ -30,68 +25,29 @@ export const LoginView: React.FC<LoginViewProps> = ({ onLogin }) => {
       return;
     }
 
-    if (authMode === 'register') {
-      if (password.length < 6) {
-        setErrorMsg('A senha deve conter no mínimo 6 caracteres.');
-        return;
-      }
-      if (password !== confirmPassword) {
-        setErrorMsg('As senhas não coincidem. Digite novamente.');
-        return;
-      }
-    }
-
     setIsLoading(true);
 
     try {
-      if (authMode === 'register') {
-        const { data, error } = await signUpUser(email, password, name || 'Casal');
-        if (error) {
-          setErrorMsg(error.message || 'Erro ao criar conta no Supabase Auth.');
-          setIsLoading(false);
-          return;
-        }
-
-        if (data?.session) {
-          setSuccessMsg('Conta criada e autenticada com sucesso!');
-          setTimeout(() => {
-            onLogin(email, name || data.user?.user_metadata?.name || 'Casal');
-          }, 600);
+      const { data, error } = await signInUser(email, password);
+      if (error) {
+        if (error.message?.includes('Invalid login credentials')) {
+          setErrorMsg('E-mail ou senha incorretos. Verifique suas credenciais do Supabase.');
         } else {
-          setSuccessMsg('Cadastro realizado! Se o Supabase exigir confirmação por e-mail, verifique sua caixa de entrada.');
-          setIsLoading(false);
+          setErrorMsg(error.message || 'Erro ao realizar login.');
         }
-      } else {
-        const { data, error } = await signInUser(email, password);
-        if (error) {
-          if (error.message.includes('Invalid login credentials')) {
-            setErrorMsg('E-mail ou senha incorretos. Verifique suas credenciais.');
-          } else {
-            setErrorMsg(error.message || 'Erro ao realizar login.');
-          }
-          setIsLoading(false);
-          return;
-        }
-
-        const userName = data.user?.user_metadata?.name || name || 'Casal';
-        setSuccessMsg('Login realizado com sucesso!');
-        setTimeout(() => {
-          onLogin(email, userName);
-        }, 500);
+        setIsLoading(false);
+        return;
       }
+
+      const userName = data.user?.user_metadata?.name || 'Casal';
+      setSuccessMsg('Login realizado com sucesso!');
+      setTimeout(() => {
+        onLogin(email, userName);
+      }, 400);
     } catch (err: any) {
-      setErrorMsg(err.message || 'Ocorreu um erro inesperado.');
+      setErrorMsg(err.message || 'Ocorreu um erro inesperado de conexão.');
       setIsLoading(false);
     }
-  };
-
-  const handleDemoLogin = () => {
-    setIsLoading(true);
-    setErrorMsg(null);
-    setTimeout(() => {
-      setIsLoading(false);
-      onLogin('casal@financasdocasal.app', 'Alex & Sam');
-    }, 400);
   };
 
   return (
@@ -110,7 +66,7 @@ export const LoginView: React.FC<LoginViewProps> = ({ onLogin }) => {
             Finanças do Casal
           </h1>
           <p className="text-xs text-purple-200/70 font-medium">
-            Gestão financeira inteligente, transparente e em sintonia para o casal.
+            Acesse a conta do casal cadastrada no Supabase.
           </p>
         </div>
 
@@ -127,38 +83,12 @@ export const LoginView: React.FC<LoginViewProps> = ({ onLogin }) => {
           </span>
         </div>
 
-        {/* Auth Mode Tabs (Login vs Register) */}
-        <div className="flex rounded-2xl bg-[#1a1633] p-1 border border-purple-500/20">
-          <button
-            type="button"
-            onClick={() => {
-              setAuthMode('login');
-              setErrorMsg(null);
-              setSuccessMsg(null);
-            }}
-            className={`flex-1 py-2 text-xs font-bold rounded-xl transition-all cursor-pointer ${
-              authMode === 'login'
-                ? 'bg-gradient-to-r from-purple-600 to-indigo-600 text-white shadow-md'
-                : 'text-purple-200/60 hover:text-white'
-            }`}
-          >
-            Entrar
-          </button>
-          <button
-            type="button"
-            onClick={() => {
-              setAuthMode('register');
-              setErrorMsg(null);
-              setSuccessMsg(null);
-            }}
-            className={`flex-1 py-2 text-xs font-bold rounded-xl transition-all cursor-pointer ${
-              authMode === 'register'
-                ? 'bg-gradient-to-r from-purple-600 to-indigo-600 text-white shadow-md'
-                : 'text-purple-200/60 hover:text-white'
-            }`}
-          >
-            Criar Conta do Casal
-          </button>
+        {/* Header da Tela de Login */}
+        <div className="text-center pb-1">
+          <h2 className="text-sm font-bold text-white">Entrar com Conta do Supabase</h2>
+          <p className="text-[11px] text-purple-200/60 mt-0.5">
+            Insira o e-mail e senha cadastrados no painel.
+          </p>
         </div>
 
         {/* Error / Success Notifications */}
@@ -176,29 +106,8 @@ export const LoginView: React.FC<LoginViewProps> = ({ onLogin }) => {
           </div>
         )}
 
-        {/* Auth Form */}
+        {/* Auth Form (Exclusivo Login) */}
         <form onSubmit={handleSubmit} className="space-y-4">
-          {authMode === 'register' && (
-            <div>
-              <label className="block text-xs font-semibold text-purple-200/80 mb-1">
-                Nome do Casal (ou dos usuários)
-              </label>
-              <div className="relative">
-                <span className="material-symbols-outlined absolute left-3 top-1/2 -translate-y-1/2 text-purple-400 text-[18px]">
-                  favorite
-                </span>
-                <input
-                  type="text"
-                  value={name}
-                  onChange={(e) => setName(e.target.value)}
-                  placeholder="Ex: Alex & Sam"
-                  className="w-full pl-10 pr-4 py-2.5 bg-[#120f24] border border-purple-500/20 rounded-xl text-xs font-medium text-white focus:ring-2 focus:ring-purple-500 outline-none"
-                  required
-                />
-              </div>
-            </div>
-          )}
-
           <div>
             <label className="block text-xs font-semibold text-purple-200/80 mb-1">
               E-mail do Casal
@@ -230,13 +139,14 @@ export const LoginView: React.FC<LoginViewProps> = ({ onLogin }) => {
                 type={showPassword ? 'text' : 'password'}
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
-                placeholder="Mínimo 6 caracteres"
+                placeholder="Digite sua senha"
                 className="w-full pl-10 pr-10 py-2.5 bg-[#120f24] border border-purple-500/20 rounded-xl text-xs font-medium text-white focus:ring-2 focus:ring-purple-500 outline-none"
                 required
               />
               <button
                 type="button"
                 onClick={() => setShowPassword(!showPassword)}
+                aria-label="Alternar visualização da senha"
                 className="absolute right-3 top-1/2 -translate-y-1/2 text-purple-300 hover:text-white"
               >
                 <span className="material-symbols-outlined text-[18px]">
@@ -246,40 +156,17 @@ export const LoginView: React.FC<LoginViewProps> = ({ onLogin }) => {
             </div>
           </div>
 
-          {authMode === 'register' && (
-            <div>
-              <label className="block text-xs font-semibold text-purple-200/80 mb-1">
-                Confirmar Senha
-              </label>
-              <div className="relative">
-                <span className="material-symbols-outlined absolute left-3 top-1/2 -translate-y-1/2 text-purple-400 text-[18px]">
-                  lock_reset
-                </span>
-                <input
-                  type={showPassword ? 'text' : 'password'}
-                  value={confirmPassword}
-                  onChange={(e) => setConfirmPassword(e.target.value)}
-                  placeholder="Repita sua senha"
-                  className="w-full pl-10 pr-4 py-2.5 bg-[#120f24] border border-purple-500/20 rounded-xl text-xs font-medium text-white focus:ring-2 focus:ring-purple-500 outline-none"
-                  required
-                />
-              </div>
-            </div>
-          )}
-
-          {authMode === 'login' && (
-            <div className="flex items-center justify-between text-xs pt-1">
-              <label className="flex items-center gap-2 cursor-pointer text-purple-200/80">
-                <input
-                  type="checkbox"
-                  checked={rememberMe}
-                  onChange={(e) => setRememberMe(e.target.checked)}
-                  className="rounded border-purple-500/30 bg-[#120f24] text-purple-600 focus:ring-purple-500"
-                />
-                Lembrar da sessão
-              </label>
-            </div>
-          )}
+          <div className="flex items-center justify-between text-xs pt-1">
+            <label className="flex items-center gap-2 cursor-pointer text-purple-200/80">
+              <input
+                type="checkbox"
+                checked={rememberMe}
+                onChange={(e) => setRememberMe(e.target.checked)}
+                className="rounded border-purple-500/30 bg-[#120f24] text-purple-600 focus:ring-purple-500"
+              />
+              Lembrar da sessão
+            </label>
+          </div>
 
           <button
             type="submit"
@@ -288,10 +175,8 @@ export const LoginView: React.FC<LoginViewProps> = ({ onLogin }) => {
           >
             {isLoading ? (
               <span className="material-symbols-outlined animate-spin text-base">progress_activity</span>
-            ) : authMode === 'login' ? (
-              'Acessar Finanças do Casal'
             ) : (
-              'Cadastrar Conta do Casal'
+              'Acessar Finanças do Casal'
             )}
           </button>
         </form>
@@ -299,7 +184,7 @@ export const LoginView: React.FC<LoginViewProps> = ({ onLogin }) => {
         {/* Security badge */}
         <div className="flex items-center justify-center gap-1.5 text-[10px] text-purple-300/60 pt-2">
           <span className="material-symbols-outlined text-xs text-purple-400">verified_user</span>
-          <span>Sessão segura e protegida com Supabase Auth</span>
+          <span>Acesso restrito a contas autorizadas no Supabase</span>
         </div>
       </div>
     </div>
