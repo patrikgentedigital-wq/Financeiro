@@ -1,9 +1,10 @@
 import React, { useState, useMemo } from 'react';
 import { Transaction, UserProfile } from '../types';
 import { ResponsiveContainer, BarChart, Bar, XAxis, YAxis, Tooltip, Legend, CartesianGrid } from 'recharts';
-import { MONTHLY_CHARTS_DATA } from '../data/initialData';
-import { ALL_CATEGORIES, getCategoryEmoji, formatCurrencyBRL, formatDateBR } from '../data/categories';
+import { formatCurrencyBRL } from '../data/categories';
 import { generateMonthlyPDFReport } from '../utils/pdfExport';
+import { calculateFinancialTotals, getCategoryBreakdown, getSixMonthHistory } from '../utils/calculations';
+import { exportTransactionsToCSV } from '../utils/csvExport';
 
 interface ReportsViewProps {
   transactions: Transaction[];
@@ -24,7 +25,7 @@ export const ReportsView: React.FC<ReportsViewProps> = ({ transactions, user }) 
     return Array.from(set).sort().reverse();
   }, [transactions]);
 
-  // Format month for label (e.g. 2026-07 -> Julho / 2026)
+  // Format month for label (e.g. 2026-07 -> Julho de 2026)
   const formatMonthLabel = (m: string) => {
     if (m === 'all') return 'Todos os Períodos';
     const [year, month] = m.split('-');
@@ -39,21 +40,20 @@ export const ReportsView: React.FC<ReportsViewProps> = ({ transactions, user }) 
     return transactions.filter((t) => t.date && t.date.startsWith(selectedMonth));
   }, [transactions, selectedMonth]);
 
-  // Compute stats for filtered transactions
-  const totalIncome = useMemo(() => {
-    return monthFilteredTransactions
-      .filter((t) => t.type === 'receita')
-      .reduce((acc, t) => acc + t.amount, 0);
+  // Compute financial totals with central utility
+  const { income: totalIncome, expenses: totalExpenses, savingsRate } = useMemo(() => {
+    return calculateFinancialTotals(monthFilteredTransactions);
   }, [monthFilteredTransactions]);
 
-  const totalExpenses = useMemo(() => {
-    return monthFilteredTransactions
-      .filter((t) => t.type === 'despesa')
-      .reduce((acc, t) => acc + t.amount, 0);
-  }, [monthFilteredTransactions]);
+  // Dynamic 6-month historical comparison from real transactions
+  const monthlyChartData = useMemo(() => {
+    return getSixMonthHistory(transactions);
+  }, [transactions]);
 
-  const netBalance = totalIncome - totalExpenses;
-  const savingsRate = totalIncome > 0 ? Math.round((netBalance / totalIncome) * 100) : 0;
+  // Category breakdown using central utility
+  const categoryBreakdown = useMemo(() => {
+    return getCategoryBreakdown(monthFilteredTransactions, 'despesa');
+  }, [monthFilteredTransactions]);
 
   // Export PDF handler
   const handleExportPDF = () => {
@@ -67,48 +67,9 @@ export const ReportsView: React.FC<ReportsViewProps> = ({ transactions, user }) 
 
   // Export CSV handler
   const handleExportCSV = () => {
-    const headers = ['Data', 'Descrição', 'Tipo', 'Categoria', 'Escopo', 'Valor (R$)'];
-    const rows = monthFilteredTransactions.map((tx) => [
-      formatDateBR(tx.date),
-      `"${tx.description.replace(/"/g, '""')}"`,
-      tx.type,
-      `"${tx.category}"`,
-      tx.isShared ? 'Casal' : 'Individual',
-      tx.amount.toFixed(2),
-    ]);
-
-    const csvContent = '\uFEFF' + [headers.join(','), ...rows.map((r) => r.join(','))].join('\n');
-    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
-    const url = URL.createObjectURL(blob);
-    const link = document.createElement('a');
-    link.href = url;
-    link.setAttribute('download', `Resumo_Mensal_Casal_${selectedMonth}.csv`);
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
+    const filename = `Resumo_Mensal_Casal_${selectedMonth}.csv`;
+    exportTransactionsToCSV(monthFilteredTransactions, filename);
   };
-
-  // Expense breakdown by category
-  const categoryBreakdown = useMemo(() => {
-    const map: Record<string, number> = {};
-    let total = 0;
-
-    monthFilteredTransactions.forEach((t) => {
-      if (t.type === 'despesa') {
-        map[t.category] = (map[t.category] || 0) + t.amount;
-        total += t.amount;
-      }
-    });
-
-    return Object.entries(map)
-      .map(([catName, val]) => ({
-        name: catName,
-        value: val,
-        emoji: getCategoryEmoji(catName, 'despesa'),
-        percent: total > 0 ? Math.round((val / total) * 100) : 0,
-      }))
-      .sort((a, b) => b.value - a.value);
-  }, [monthFilteredTransactions]);
 
   return (
     <div className="space-y-6 animate-in fade-in pb-12">
@@ -168,7 +129,7 @@ export const ReportsView: React.FC<ReportsViewProps> = ({ transactions, user }) 
           <span className="text-xs font-bold text-emerald-400 uppercase tracking-wider block mb-1">
             Receitas Totais
           </span>
-          <p className="text-2xl font-black text-emerald-400">{formatCurrencyBRL(totalIncome)}</p>
+          <p className="text-2xl font-black text-emerald-400 break-words">{formatCurrencyBRL(totalIncome)}</p>
           <p className="text-[11px] text-emerald-300/60 mt-1">Ganhos somados do casal</p>
         </div>
 
@@ -176,7 +137,7 @@ export const ReportsView: React.FC<ReportsViewProps> = ({ transactions, user }) 
           <span className="text-xs font-bold text-rose-400 uppercase tracking-wider block mb-1">
             Despesas Totais
           </span>
-          <p className="text-2xl font-black text-rose-400">{formatCurrencyBRL(totalExpenses)}</p>
+          <p className="text-2xl font-black text-rose-400 break-words">{formatCurrencyBRL(totalExpenses)}</p>
           <p className="text-[11px] text-rose-300/60 mt-1">Gastos somados do casal</p>
         </div>
 
@@ -189,7 +150,7 @@ export const ReportsView: React.FC<ReportsViewProps> = ({ transactions, user }) 
         </div>
       </div>
 
-      {/* 6-Month Comparison Bar Chart */}
+      {/* Dynamic 6-Month Comparison Bar Chart */}
       <div className="glass-card rounded-3xl p-6 md:p-8 border border-purple-500/20 space-y-4">
         <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-2 border-b border-purple-500/10 pb-4">
           <div>
@@ -207,7 +168,7 @@ export const ReportsView: React.FC<ReportsViewProps> = ({ transactions, user }) 
 
         <div className="h-72 w-full pt-4">
           <ResponsiveContainer width="100%" height="100%">
-            <BarChart data={MONTHLY_CHARTS_DATA} margin={{ top: 10, right: 10, left: -10, bottom: 0 }}>
+            <BarChart data={monthlyChartData} margin={{ top: 10, right: 10, left: -10, bottom: 0 }}>
               <CartesianGrid strokeDasharray="3 3" stroke="rgba(139, 92, 246, 0.1)" />
               <XAxis dataKey="month" stroke="#a78bfa" fontSize={12} tickLine={false} axisLine={false} />
               <YAxis
@@ -215,7 +176,7 @@ export const ReportsView: React.FC<ReportsViewProps> = ({ transactions, user }) 
                 fontSize={12}
                 tickLine={false}
                 axisLine={false}
-                tickFormatter={(v) => `R$${v / 1000}k`}
+                tickFormatter={(v) => `R$${v >= 1000 ? `${(v / 1000).toFixed(0)}k` : v}`}
               />
               <Tooltip
                 formatter={(val: any) => [formatCurrencyBRL(Number(val)), '']}
@@ -251,13 +212,13 @@ export const ReportsView: React.FC<ReportsViewProps> = ({ transactions, user }) 
                     <span>{cat.emoji}</span>
                     <span>{cat.name}</span>
                   </span>
-                  <span className="font-extrabold text-purple-300">{cat.percent}%</span>
+                  <span className="font-extrabold text-purple-300">{cat.percentage}%</span>
                 </div>
 
                 <div className="w-full h-2 bg-purple-950 rounded-full overflow-hidden">
                   <div
                     className="h-full bg-gradient-to-r from-purple-500 to-indigo-500 rounded-full"
-                    style={{ width: `${Math.min(cat.percent, 100)}%` }}
+                    style={{ width: `${Math.min(cat.percentage, 100)}%` }}
                   />
                 </div>
 

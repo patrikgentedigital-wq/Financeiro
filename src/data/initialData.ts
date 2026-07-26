@@ -8,17 +8,15 @@ export const INITIAL_USER: UserProfile = {
   totalBalance: 0,
   monthlyIncomeGoal: 10000.00,
   totalBudgetGoal: 5000.00,
-  partner1Name: 'Parceiro(a) 1',
-  partner2Name: 'Parceiro(a) 2',
+  partner1Name: 'Alex',
+  partner2Name: 'Sam',
+  savingsGoal: {
+    id: '1',
+    title: 'Viagem em Casal',
+    description: 'Férias do Casal',
+    currentAmount: 3200,
+    targetAmount: 5000,
+  },
 };
 
 export const INITIAL_TRANSACTIONS: Transaction[] = [];
-
-export const MONTHLY_CHARTS_DATA = [
-  { month: 'Fev', Renda: 0, Despesas: 0 },
-  { month: 'Mar', Renda: 0, Despesas: 0 },
-  { month: 'Abr', Renda: 0, Despesas: 0 },
-  { month: 'Mai', Renda: 0, Despesas: 0 },
-  { month: 'Jun', Renda: 0, Despesas: 0 },
-  { month: 'Jul', Renda: 0, Despesas: 0 },
-];

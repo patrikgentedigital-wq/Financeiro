@@ -10,7 +10,18 @@ export interface Transaction {
   type: TransactionType; // 'receita' | 'despesa'
   category: string;
   isShared: boolean; // true = Gasto do casal, false = Individual (só meus)
-  paidBy?: string; // 'Alex' | 'Sam' | 'Casal'
+  paidBy?: string; // Nome do responsável ('Casal' ou nome do parceiro)
+  isDeleted?: boolean;
+  deletedAt?: string;
+  version?: number;
+}
+
+export interface SavingsGoal {
+  id: string;
+  title: string;
+  description: string;
+  currentAmount: number;
+  targetAmount: number;
 }
 
 export interface UserProfile {
@@ -23,6 +34,7 @@ export interface UserProfile {
   totalBudgetGoal: number;
   partner1Name?: string;
   partner2Name?: string;
+  savingsGoal?: SavingsGoal;
 }
 
 export interface ToastNotification {

@@ -1,7 +1,6 @@
-import jsPDF from 'jspdf';
-import autoTable from 'jspdf-autotable';
 import { Transaction } from '../types';
 import { formatCurrencyBRL, formatDateBR } from '../data/categories';
+import { calculateFinancialTotals, getCategoryBreakdown } from './calculations';
 
 interface ExportPDFOptions {
   monthName: string;
@@ -9,11 +8,15 @@ interface ExportPDFOptions {
   coupleName?: string;
 }
 
-export function generateMonthlyPDFReport({
+export async function generateMonthlyPDFReport({
   monthName,
   transactions,
   coupleName = 'Finanças do Casal',
 }: ExportPDFOptions) {
+  // Dynamic import of heavy PDF libraries on demand
+  const { default: jsPDF } = await import('jspdf');
+  const { default: autoTable } = await import('jspdf-autotable');
+
   const doc = new jsPDF({
     orientation: 'portrait',
     unit: 'mm',
@@ -23,14 +26,7 @@ export function generateMonthlyPDFReport({
   const pageWidth = doc.internal.pageSize.getWidth();
   const pageHeight = doc.internal.pageSize.getHeight();
 
-  // Colors
-  const primaryPurple = '#6D28D9';
-  const darkBg = '#1E1B4B';
-  const greenText = '#059669';
-  const redText = '#DC2626';
-
   // --- Header Banner ---
-  // Top Banner Rect
   doc.setFillColor(30, 27, 75); // #1E1B4B
   doc.rect(0, 0, pageWidth, 32, 'F');
 
@@ -61,17 +57,9 @@ export function generateMonthlyPDFReport({
   doc.setTextColor(196, 181, 253);
   doc.text(`Gerado em: ${todayStr}`, pageWidth - 14, 24, { align: 'right' });
 
-  // --- Financial Highlights (KPI Boxes) ---
-  const totalIncome = transactions
-    .filter((t) => t.type === 'receita')
-    .reduce((acc, t) => acc + t.amount, 0);
-
-  const totalExpenses = transactions
-    .filter((t) => t.type === 'despesa')
-    .reduce((acc, t) => acc + t.amount, 0);
-
-  const netBalance = totalIncome - totalExpenses;
-  const savingsRate = totalIncome > 0 ? Math.round((netBalance / totalIncome) * 100) : 0;
+  // --- Financial Highlights (KPI Boxes using central calculations) ---
+  const { income: totalIncome, expenses: totalExpenses, balance: netBalance, savingsRate } =
+    calculateFinancialTotals(transactions);
 
   const startY = 40;
   const cardWidth = (pageWidth - 28 - 12) / 3; // 3 cards
@@ -132,21 +120,13 @@ export function generateMonthlyPDFReport({
   doc.setTextColor(30, 27, 75);
   doc.text('Resumo por Categoria de Gastos', 14, currentY);
 
-  // Compute breakdown map
-  const catMap: Record<string, number> = {};
-  transactions.forEach((t) => {
-    if (t.type === 'despesa') {
-      catMap[t.category] = (catMap[t.category] || 0) + t.amount;
-    }
-  });
-
-  const catRows = Object.entries(catMap)
-    .sort((a, b) => b[1] - a[1])
-    .map(([catName, val]) => [
-      catName,
-      totalExpenses > 0 ? `${Math.round((val / totalExpenses) * 100)}%` : '0%',
-      formatCurrencyBRL(val),
-    ]);
+  // Compute breakdown map using central calculations utility
+  const catBreakdown = getCategoryBreakdown(transactions, 'despesa');
+  const catRows = catBreakdown.map((cat) => [
+    cat.name,
+    `${cat.percentage}%`,
+    formatCurrencyBRL(cat.value),
+  ]);
 
   if (catRows.length > 0) {
     autoTable(doc, {

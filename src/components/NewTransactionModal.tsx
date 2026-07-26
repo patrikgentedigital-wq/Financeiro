@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { Transaction, TransactionType, UserProfile } from '../types';
 import { EXPENSE_CATEGORIES, INCOME_CATEGORIES } from '../data/categories';
 
@@ -6,6 +6,8 @@ interface NewTransactionModalProps {
   isOpen: boolean;
   onClose: () => void;
   onAddTransaction: (newTx: Omit<Transaction, 'id'>) => void;
+  onUpdateTransaction?: (tx: Transaction) => void;
+  initialTx?: Transaction | null;
   user?: UserProfile;
 }
 
@@ -13,6 +15,8 @@ export const NewTransactionModal: React.FC<NewTransactionModalProps> = ({
   isOpen,
   onClose,
   onAddTransaction,
+  onUpdateTransaction,
+  initialTx,
   user,
 }) => {
   const partner1 = user?.partner1Name || 'Parceiro 1';
@@ -27,6 +31,26 @@ export const NewTransactionModal: React.FC<NewTransactionModalProps> = ({
   const [isShared, setIsShared] = useState(true);
   const [paidBy, setPaidBy] = useState('Casal');
 
+  useEffect(() => {
+    if (initialTx) {
+      setDate(initialTx.date || today);
+      setDescription(initialTx.description || '');
+      setAmount(String(initialTx.amount || ''));
+      setType(initialTx.type || 'despesa');
+      setCategory(initialTx.category || EXPENSE_CATEGORIES[0].name);
+      setIsShared(initialTx.isShared ?? true);
+      setPaidBy(initialTx.paidBy || 'Casal');
+    } else {
+      setDate(today);
+      setDescription('');
+      setAmount('');
+      setType('despesa');
+      setCategory(EXPENSE_CATEGORIES[0].name);
+      setIsShared(true);
+      setPaidBy('Casal');
+    }
+  }, [initialTx, isOpen]);
+
   if (!isOpen) return null;
 
   const currentCategories = type === 'despesa' ? EXPENSE_CATEGORIES : INCOME_CATEGORIES;
@@ -39,21 +63,34 @@ export const NewTransactionModal: React.FC<NewTransactionModalProps> = ({
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    const parsedAmount = parseFloat(amount.replace(',', '.'));
+    const parsedAmount = Math.abs(parseFloat(amount.replace(',', '.')));
     if (!description.trim() || isNaN(parsedAmount) || parsedAmount <= 0) {
       alert('Por favor, preencha a descrição e um valor numérico válido maior que zero.');
       return;
     }
 
-    onAddTransaction({
-      date: date || today,
-      description: description.trim(),
-      amount: parsedAmount,
-      type,
-      category,
-      isShared,
-      paidBy: paidBy || 'Casal',
-    });
+    if (initialTx && onUpdateTransaction) {
+      onUpdateTransaction({
+        ...initialTx,
+        date: date || today,
+        description: description.trim(),
+        amount: parsedAmount,
+        type,
+        category,
+        isShared,
+        paidBy: paidBy || 'Casal',
+      });
+    } else {
+      onAddTransaction({
+        date: date || today,
+        description: description.trim(),
+        amount: parsedAmount,
+        type,
+        category,
+        isShared,
+        paidBy: paidBy || 'Casal',
+      });
+    }
 
     // Reset fields
     setDescription('');
@@ -65,21 +102,27 @@ export const NewTransactionModal: React.FC<NewTransactionModalProps> = ({
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-md animate-in fade-in">
-      <div className="glass-card rounded-3xl shadow-2xl border border-purple-500/20 max-w-lg w-full p-6 md:p-8 space-y-6 relative bg-[#1c1833] text-white">
+      <div className="glass-card rounded-3xl shadow-2xl border border-purple-500/20 max-w-lg w-full max-h-[90vh] overflow-y-auto p-6 md:p-8 space-y-6 relative bg-[#1c1833] text-white">
         <button
           onClick={onClose}
-          className="absolute top-6 right-6 p-2 rounded-full hover:bg-white/10 text-gray-400 hover:text-white transition-colors cursor-pointer"
+          className="absolute top-6 right-6 p-2.5 rounded-full hover:bg-white/10 text-gray-400 hover:text-white transition-colors cursor-pointer min-w-[44px] min-h-[44px] flex items-center justify-center"
         >
           <span className="material-symbols-outlined">close</span>
         </button>
 
         <div className="flex items-center gap-3 border-b border-purple-500/20 pb-4">
           <div className="w-11 h-11 rounded-2xl bg-gradient-to-br from-purple-600 to-indigo-600 text-white flex items-center justify-center shadow-lg shadow-purple-900/30">
-            <span className="material-symbols-outlined text-2xl">add_card</span>
+            <span className="material-symbols-outlined text-2xl">
+              {initialTx ? 'edit_note' : 'add_card'}
+            </span>
           </div>
           <div>
-            <h3 className="text-xl font-extrabold text-white tracking-tight">Nova Transação</h3>
-            <p className="text-xs text-purple-200/70 font-medium">Cadastre um novo lançamento no Finanças do Casal</p>
+            <h3 className="text-xl font-extrabold text-white tracking-tight">
+              {initialTx ? 'Editar Transação' : 'Nova Transação'}
+            </h3>
+            <p className="text-xs text-purple-200/70 font-medium">
+              {initialTx ? 'Atualize as informações do lançamento' : 'Cadastre um novo lançamento no Finanças do Casal'}
+            </p>
           </div>
         </div>
 
@@ -89,7 +132,7 @@ export const NewTransactionModal: React.FC<NewTransactionModalProps> = ({
             <button
               type="button"
               onClick={() => handleTypeChange('despesa')}
-              className={`py-2.5 rounded-xl text-xs font-bold transition-all cursor-pointer flex items-center justify-center gap-1.5 ${
+              className={`py-2.5 rounded-xl text-xs font-bold transition-all cursor-pointer flex items-center justify-center gap-1.5 min-h-[44px] ${
                 type === 'despesa'
                   ? 'bg-rose-600 text-white shadow-lg shadow-rose-900/30'
                   : 'text-gray-400 hover:text-white'
@@ -102,7 +145,7 @@ export const NewTransactionModal: React.FC<NewTransactionModalProps> = ({
             <button
               type="button"
               onClick={() => handleTypeChange('receita')}
-              className={`py-2.5 rounded-xl text-xs font-bold transition-all cursor-pointer flex items-center justify-center gap-1.5 ${
+              className={`py-2.5 rounded-xl text-xs font-bold transition-all cursor-pointer flex items-center justify-center gap-1.5 min-h-[44px] ${
                 type === 'receita'
                   ? 'bg-emerald-600 text-white shadow-lg shadow-emerald-900/30'
                   : 'text-gray-400 hover:text-white'
@@ -137,6 +180,8 @@ export const NewTransactionModal: React.FC<NewTransactionModalProps> = ({
               <input
                 type="number"
                 step="0.01"
+                min="0.01"
+                inputMode="decimal"
                 value={amount}
                 onChange={(e) => setAmount(e.target.value)}
                 placeholder="0,00"
@@ -152,6 +197,8 @@ export const NewTransactionModal: React.FC<NewTransactionModalProps> = ({
               </label>
               <input
                 type="date"
+                min="2000-01-01"
+                max="2099-12-31"
                 value={date}
                 onChange={(e) => setDate(e.target.value)}
                 className="w-full px-4 py-2.5 bg-[#120f24] border border-purple-500/20 rounded-xl font-medium text-xs text-white focus:ring-2 focus:ring-purple-500 outline-none"
@@ -232,7 +279,7 @@ export const NewTransactionModal: React.FC<NewTransactionModalProps> = ({
               type="submit"
               className="px-6 py-2.5 bg-gradient-to-r from-purple-600 to-indigo-600 text-white rounded-xl text-xs font-bold shadow-lg shadow-purple-900/40 hover:opacity-95 active:scale-95 transition-all cursor-pointer"
             >
-              Salvar Lançamento
+              {initialTx ? 'Salvar Alterações' : 'Salvar Lançamento'}
             </button>
           </div>
         </form>

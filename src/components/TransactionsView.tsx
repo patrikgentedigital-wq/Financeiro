@@ -1,11 +1,13 @@
 import React, { useState, useMemo } from 'react';
 import { Transaction, TransactionType } from '../types';
 import { ALL_CATEGORIES, getCategoryEmoji, formatCurrencyBRL, formatDateBR } from '../data/categories';
+import { exportTransactionsToCSV } from '../utils/csvExport';
 
 interface TransactionsViewProps {
   transactions: Transaction[];
   onOpenNewTransaction: () => void;
   onDeleteTransaction: (id: string) => void;
+  onEditTransaction?: (tx: Transaction) => void;
   initialSearchQuery?: string;
 }
 
@@ -13,6 +15,7 @@ export const TransactionsView: React.FC<TransactionsViewProps> = ({
   transactions,
   onOpenNewTransaction,
   onDeleteTransaction,
+  onEditTransaction,
   initialSearchQuery = '',
 }) => {
   const [searchQuery, setSearchQuery] = useState(initialSearchQuery);
@@ -51,13 +54,17 @@ export const TransactionsView: React.FC<TransactionsViewProps> = ({
     return transactions.filter((tx) => {
       // Search
       const query = searchQuery.toLowerCase().trim();
-      const matchSearch = !query || tx.description.toLowerCase().includes(query) || tx.category.toLowerCase().includes(query);
+      const matchSearch =
+        !query ||
+        tx.description.toLowerCase().includes(query) ||
+        tx.category.toLowerCase().includes(query);
 
       // Type
       const matchType = typeFilter === 'todos' || tx.type === typeFilter;
 
       // Category
-      const matchCategory = categoryFilter === 'todas' || tx.category.toLowerCase() === categoryFilter.toLowerCase();
+      const matchCategory =
+        categoryFilter === 'todas' || tx.category.toLowerCase() === categoryFilter.toLowerCase();
 
       // Month
       const matchMonth = monthFilter === 'todos' || (tx.date && tx.date.startsWith(monthFilter));
@@ -73,28 +80,10 @@ export const TransactionsView: React.FC<TransactionsViewProps> = ({
     return filteredTransactions.slice(start, start + itemsPerPage);
   }, [filteredTransactions, currentPage]);
 
-  // Export CSV
+  // Export CSV using shared utility
   const handleExportCSV = () => {
-    const headers = ['Data', 'Descrição', 'Tipo', 'Categoria', 'Escopo', 'Responsável', 'Valor (R$)'];
-    const rows = filteredTransactions.map((tx) => [
-      formatDateBR(tx.date),
-      `"${tx.description.replace(/"/g, '""')}"`,
-      tx.type,
-      `"${tx.category}"`,
-      tx.isShared ? 'Casal' : 'Individual',
-      tx.paidBy || '',
-      tx.amount.toFixed(2),
-    ]);
-
-    const csvContent = '\uFEFF' + [headers.join(','), ...rows.map((r) => r.join(','))].join('\n');
-    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
-    const url = URL.createObjectURL(blob);
-    const link = document.createElement('a');
-    link.href = url;
-    link.setAttribute('download', `Financas_do_Casal_Export_${monthFilter !== 'todos' ? monthFilter : 'Geral'}.csv`);
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
+    const filename = `Financas_do_Casal_Export_${monthFilter !== 'todos' ? monthFilter : 'Geral'}.csv`;
+    exportTransactionsToCSV(filteredTransactions, filename);
   };
 
   const confirmDelete = (id: string) => {
@@ -216,9 +205,89 @@ export const TransactionsView: React.FC<TransactionsViewProps> = ({
         </div>
       </div>
 
-      {/* Transactions Table Container */}
+      {/* Transactions Container (Mobile Cards & Desktop Table) */}
       <div className="glass-card rounded-3xl border border-purple-500/20 overflow-hidden shadow-2xl">
-        <div className="overflow-x-auto">
+        {/* 1. VISÃO EM CARTÕES PARA DISPOSITIVOS MÓVEIS (block md:hidden) */}
+        <div className="block md:hidden p-4 space-y-3">
+          {paginatedTransactions.length === 0 ? (
+            <div className="py-12 text-center text-gray-400 text-xs">
+              Nenhuma transação encontrada com os filtros selecionados.
+            </div>
+          ) : (
+            paginatedTransactions.map((tx) => (
+              <div
+                key={tx.id}
+                className="p-4 rounded-2xl bg-[#120f24] border border-purple-500/20 space-y-3 shadow-md"
+              >
+                <div className="flex items-center justify-between">
+                  <span className="text-[11px] font-semibold text-purple-300">
+                    {formatDateBR(tx.date)}
+                  </span>
+                  <span
+                    className={`text-sm font-black ${
+                      tx.type === 'receita' ? 'text-emerald-400' : 'text-rose-400'
+                    }`}
+                  >
+                    {tx.type === 'receita' ? '+' : '-'} {formatCurrencyBRL(tx.amount)}
+                  </span>
+                </div>
+
+                <div className="flex items-center gap-3">
+                  <div className="w-10 h-10 rounded-xl bg-purple-900/30 border border-purple-500/20 flex items-center justify-center text-lg shrink-0">
+                    {getCategoryEmoji(tx.category, tx.type)}
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <p className="font-bold text-white text-xs truncate">{tx.description}</p>
+                    <div className="flex items-center gap-2 mt-0.5">
+                      <span className="px-2 py-0.5 rounded-full text-[10px] bg-purple-900/40 text-purple-200 border border-purple-500/20">
+                        {tx.category}
+                      </span>
+                      {tx.paidBy && (
+                        <span className="text-[10px] text-purple-300/70">
+                          {tx.paidBy}
+                        </span>
+                      )}
+                    </div>
+                  </div>
+                </div>
+
+                <div className="flex items-center justify-between pt-2 border-t border-purple-500/10 text-xs">
+                  <span
+                    className={`px-2.5 py-0.5 rounded-full text-[10px] font-bold flex items-center gap-1 ${
+                      tx.isShared
+                        ? 'bg-purple-500/20 text-purple-300 border border-purple-500/30'
+                        : 'bg-gray-800 text-gray-300 border border-gray-700'
+                    }`}
+                  >
+                    <span>{tx.isShared ? '👥 Casal' : '👤 Indiv.'}</span>
+                  </span>
+
+                  <div className="flex items-center gap-2">
+                    {onEditTransaction && (
+                      <button
+                        onClick={() => onEditTransaction(tx)}
+                        className="min-w-[44px] min-h-[44px] rounded-xl bg-purple-500/10 hover:bg-purple-500/20 text-purple-300 border border-purple-500/20 flex items-center justify-center transition-colors cursor-pointer"
+                        title="Editar lançamento"
+                      >
+                        <span className="material-symbols-outlined text-lg">edit</span>
+                      </button>
+                    )}
+                    <button
+                      onClick={() => setDeletingTxId(tx.id)}
+                      className="min-w-[44px] min-h-[44px] rounded-xl bg-rose-500/10 hover:bg-rose-500/20 text-rose-400 border border-rose-500/20 flex items-center justify-center transition-colors cursor-pointer"
+                      title="Excluir lançamento"
+                    >
+                      <span className="material-symbols-outlined text-lg">delete</span>
+                    </button>
+                  </div>
+                </div>
+              </div>
+            ))
+          )}
+        </div>
+
+        {/* 2. TABELA TRADICIONAL PARA DESKTOP (hidden md:block) */}
+        <div className="hidden md:block overflow-x-auto">
           <table className="w-full text-left border-collapse">
             <thead>
               <tr className="bg-[#120f24] border-b border-purple-500/20 text-purple-200 text-[11px] font-extrabold uppercase tracking-wider">
@@ -288,15 +357,26 @@ export const TransactionsView: React.FC<TransactionsViewProps> = ({
                       </span>
                     </td>
 
-                    {/* Excluir Lançamento */}
+                    {/* Ações (Editar & Excluir) */}
                     <td className="px-6 py-4 text-center whitespace-nowrap">
-                      <button
-                        onClick={() => setDeletingTxId(tx.id)}
-                        className="p-1.5 rounded-lg bg-rose-500/10 hover:bg-rose-500/20 text-rose-400 border border-rose-500/20 transition-colors cursor-pointer"
-                        title="Excluir lançamento"
-                      >
-                        <span className="material-symbols-outlined text-base">delete</span>
-                      </button>
+                      <div className="flex items-center justify-center gap-2">
+                        {onEditTransaction && (
+                          <button
+                            onClick={() => onEditTransaction(tx)}
+                            className="min-w-[40px] min-h-[40px] rounded-xl bg-purple-500/10 hover:bg-purple-500/20 text-purple-300 border border-purple-500/20 flex items-center justify-center transition-colors cursor-pointer"
+                            title="Editar lançamento"
+                          >
+                            <span className="material-symbols-outlined text-base">edit</span>
+                          </button>
+                        )}
+                        <button
+                          onClick={() => setDeletingTxId(tx.id)}
+                          className="min-w-[40px] min-h-[40px] rounded-xl bg-rose-500/10 hover:bg-rose-500/20 text-rose-400 border border-rose-500/20 flex items-center justify-center transition-colors cursor-pointer"
+                          title="Excluir lançamento"
+                        >
+                          <span className="material-symbols-outlined text-base">delete</span>
+                        </button>
+                      </div>
                     </td>
                   </tr>
                 ))
@@ -317,7 +397,7 @@ export const TransactionsView: React.FC<TransactionsViewProps> = ({
             <button
               onClick={() => setCurrentPage((p) => Math.max(p - 1, 1))}
               disabled={currentPage === 1}
-              className="p-2 rounded-xl border border-purple-500/20 disabled:opacity-30 cursor-pointer hover:bg-purple-500/10 text-white"
+              className="min-w-[40px] min-h-[40px] flex items-center justify-center rounded-xl border border-purple-500/20 disabled:opacity-30 cursor-pointer hover:bg-purple-500/10 text-white"
             >
               <span className="material-symbols-outlined text-sm">chevron_left</span>
             </button>
@@ -326,7 +406,7 @@ export const TransactionsView: React.FC<TransactionsViewProps> = ({
               <button
                 key={idx + 1}
                 onClick={() => setCurrentPage(idx + 1)}
-                className={`w-8 h-8 rounded-xl font-bold text-xs cursor-pointer ${
+                className={`min-w-[40px] min-h-[40px] rounded-xl font-bold text-xs cursor-pointer flex items-center justify-center ${
                   currentPage === idx + 1
                     ? 'bg-purple-600 text-white shadow-md shadow-purple-900/40'
                     : 'border border-purple-500/20 hover:bg-purple-500/10 text-gray-300'
@@ -339,7 +419,7 @@ export const TransactionsView: React.FC<TransactionsViewProps> = ({
             <button
               onClick={() => setCurrentPage((p) => Math.min(p + 1, totalPages))}
               disabled={currentPage === totalPages || totalPages === 0}
-              className="p-2 rounded-xl border border-purple-500/20 disabled:opacity-30 cursor-pointer hover:bg-purple-500/10 text-white"
+              className="min-w-[40px] min-h-[40px] flex items-center justify-center rounded-xl border border-purple-500/20 disabled:opacity-30 cursor-pointer hover:bg-purple-500/10 text-white"
             >
               <span className="material-symbols-outlined text-sm">chevron_right</span>
             </button>

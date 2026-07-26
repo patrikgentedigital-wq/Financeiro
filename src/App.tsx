@@ -5,6 +5,8 @@ import {
   fetchTransactionsFromSupabase,
   saveTransactionToSupabase,
   deleteTransactionFromSupabase,
+  subscribeToTransactionsRealtime,
+  isSupabaseConfigured,
   supabase,
   signOutUser,
 } from './lib/supabase';
@@ -23,7 +25,7 @@ export function App() {
     const saved = localStorage.getItem('financas_casal_user');
     if (saved) {
       try {
-        return JSON.parse(saved);
+        return { ...INITIAL_USER, ...JSON.parse(saved) };
       } catch (e) {
         return INITIAL_USER;
       }
@@ -52,9 +54,10 @@ export function App() {
 
   const [globalSearchQuery, setGlobalSearchQuery] = useState<string>('');
   const [isNewTxModalOpen, setIsNewTxModalOpen] = useState<boolean>(false);
+  const [editingTransaction, setEditingTransaction] = useState<Transaction | null>(null);
   const [toasts, setToasts] = useState<ToastNotification[]>([]);
 
-  // Dark Mode State (enabled by default for modern dark purple couple aesthetic)
+  // Dark Mode State
   const [isDarkMode, setIsDarkMode] = useState<boolean>(() => {
     const saved = localStorage.getItem('financas_casal_theme');
     return saved ? saved === 'dark' : true;
@@ -121,16 +124,24 @@ export function App() {
     }
   }, [user, isAuthenticated]);
 
-  // Attempt Supabase Sync on load
+  // Attempt Supabase Sync on load & set up Realtime listener
   useEffect(() => {
     async function syncSupabase() {
       const cloudTxs = await fetchTransactionsFromSupabase();
       if (cloudTxs && cloudTxs.length > 0) {
         setTransactions(cloudTxs);
-        addToast('success', 'Dados sincronizados com o Supabase com sucesso!');
       }
     }
-    syncSupabase();
+
+    if (isSupabaseConfigured) {
+      syncSupabase();
+      const unsubscribe = subscribeToTransactionsRealtime(() => {
+        syncSupabase();
+      });
+      return () => {
+        if (unsubscribe) unsubscribe();
+      };
+    }
   }, []);
 
   const handleToggleDarkMode = () => {
@@ -155,7 +166,7 @@ export function App() {
     const updatedUser: UserProfile = {
       ...user,
       email,
-      name: name || user.name || 'Alex & Sam',
+      name: name || user.name || 'Nosso Casal',
     };
     setUser(updatedUser);
     setIsAuthenticated(true);
@@ -187,15 +198,33 @@ export function App() {
 
     setTransactions((prev) => [newTx, ...prev]);
 
-    // Save to Supabase if configured
-    await saveTransactionToSupabase(newTx);
-
-    // Toast notification
+    // Save to Supabase if configured & check result
+    const savedOnCloud = await saveTransactionToSupabase(newTx);
     const typeLabel = newTx.type === 'receita' ? 'Receita' : 'Despesa';
-    addToast(
-      'success',
-      `✨ ${typeLabel} "${newTx.description}" de R$ ${newTx.amount.toFixed(2)} adicionada!`
-    );
+
+    if (isSupabaseConfigured && !savedOnCloud) {
+      addToast('info', `✨ ${typeLabel} "${newTx.description}" salva localmente (falha na nuvem).`);
+    } else {
+      addToast(
+        'success',
+        `✨ ${typeLabel} "${newTx.description}" de R$ ${newTx.amount.toFixed(2)} adicionada!`
+      );
+    }
+  };
+
+  // Edit existing transaction
+  const handleUpdateTransaction = async (updatedTx: Transaction) => {
+    setTransactions((prev) => prev.map((t) => (t.id === updatedTx.id ? updatedTx : t)));
+
+    // Update in Supabase
+    const savedOnCloud = await saveTransactionToSupabase(updatedTx);
+    if (isSupabaseConfigured && !savedOnCloud) {
+      addToast('info', `✏️ Transação "${updatedTx.description}" atualizada localmente.`);
+    } else {
+      addToast('success', `✏️ Transação "${updatedTx.description}" atualizada!`);
+    }
+
+    setEditingTransaction(null);
   };
 
   // Delete transaction
@@ -219,6 +248,16 @@ export function App() {
     addToast('info', 'Dados restaurados para o padrão original.');
   };
 
+  const handleOpenEditModal = (tx: Transaction) => {
+    setEditingTransaction(tx);
+    setIsNewTxModalOpen(true);
+  };
+
+  const handleCloseModal = () => {
+    setIsNewTxModalOpen(false);
+    setEditingTransaction(null);
+  };
+
   if (!isAuthenticated) {
     return <LoginView onLogin={handleLogin} />;
   }
@@ -230,7 +269,10 @@ export function App() {
         currentView={currentView}
         onNavigate={setCurrentView}
         user={user}
-        onOpenNewTransaction={() => setIsNewTxModalOpen(true)}
+        onOpenNewTransaction={() => {
+          setEditingTransaction(null);
+          setIsNewTxModalOpen(true);
+        }}
         globalSearchQuery={globalSearchQuery}
         onSearchChange={handleSearchChange}
         onLogout={handleLogout}
@@ -245,16 +287,24 @@ export function App() {
             user={user}
             transactions={transactions}
             onNavigate={setCurrentView}
-            onOpenNewTransaction={() => setIsNewTxModalOpen(true)}
+            onOpenNewTransaction={() => {
+              setEditingTransaction(null);
+              setIsNewTxModalOpen(true);
+            }}
             onDeleteTransaction={handleDeleteTransaction}
+            onEditTransaction={handleOpenEditModal}
           />
         )}
 
         {currentView === 'transactions' && (
           <TransactionsView
             transactions={transactions}
-            onOpenNewTransaction={() => setIsNewTxModalOpen(true)}
+            onOpenNewTransaction={() => {
+              setEditingTransaction(null);
+              setIsNewTxModalOpen(true);
+            }}
             onDeleteTransaction={handleDeleteTransaction}
+            onEditTransaction={handleOpenEditModal}
             initialSearchQuery={globalSearchQuery}
           />
         )}
@@ -272,11 +322,13 @@ export function App() {
         )}
       </main>
 
-      {/* New Transaction Modal */}
+      {/* New / Edit Transaction Modal */}
       <NewTransactionModal
         isOpen={isNewTxModalOpen}
-        onClose={() => setIsNewTxModalOpen(false)}
+        onClose={handleCloseModal}
         onAddTransaction={handleAddTransaction}
+        onUpdateTransaction={handleUpdateTransaction}
+        initialTx={editingTransaction}
         user={user}
       />
 

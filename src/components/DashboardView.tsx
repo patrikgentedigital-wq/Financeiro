@@ -2,8 +2,9 @@ import React, { useState, useMemo } from 'react';
 import { ResponsiveContainer, PieChart, Pie, Cell, Tooltip } from 'recharts';
 import { Transaction, UserProfile, ViewMode } from '../types';
 import { DailyTipCard } from './DailyTipCard';
-import { getCategoryEmoji, formatCurrencyBRL, formatDateBR } from '../data/categories';
+import { formatCurrencyBRL, formatDateBR } from '../data/categories';
 import { generateMonthlyPDFReport } from '../utils/pdfExport';
+import { calculateFinancialTotals, getCategoryBreakdown } from '../utils/calculations';
 
 interface DashboardViewProps {
   user: UserProfile;
@@ -11,6 +12,7 @@ interface DashboardViewProps {
   onNavigate: (view: ViewMode) => void;
   onOpenNewTransaction: () => void;
   onDeleteTransaction: (id: string) => void;
+  onEditTransaction?: (tx: Transaction) => void;
 }
 
 export const DashboardView: React.FC<DashboardViewProps> = ({
@@ -19,58 +21,31 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
   onNavigate,
   onOpenNewTransaction,
   onDeleteTransaction,
+  onEditTransaction,
 }) => {
   // Toggle for Couple View vs Individual View
   const [viewScope, setViewScope] = useState<'couple' | 'individual'>('couple');
   const [deletingTxId, setDeletingTxId] = useState<string | null>(null);
 
-  // Filter transactions by selected scope
+  // Dynamic filter for individual view (check against partner1Name or user.name)
   const scopedTransactions = useMemo(() => {
     if (viewScope === 'individual') {
-      return transactions.filter((t) => !t.isShared || t.paidBy === 'Alex');
+      const myName = (user.partner1Name || user.name || '').toLowerCase();
+      return transactions.filter(
+        (t) => !t.isShared || (t.paidBy && t.paidBy.toLowerCase() === myName)
+      );
     }
     return transactions; // couple view shows all
-  }, [transactions, viewScope]);
+  }, [transactions, viewScope, user]);
 
-  // Calculate current month financial totals
+  // Calculate current financial totals using central utility
   const currentMonthTotals = useMemo(() => {
-    let income = 0;
-    let expenses = 0;
-
-    scopedTransactions.forEach((t) => {
-      if (t.type === 'receita') {
-        income += t.amount;
-      } else {
-        expenses += t.amount;
-      }
-    });
-
-    const balance = income - expenses;
-
-    return { income, expenses, balance };
+    return calculateFinancialTotals(scopedTransactions);
   }, [scopedTransactions]);
 
-  // Spending by category data for PieChart
+  // Spending by category data for PieChart using central utility
   const categoryChartData = useMemo(() => {
-    const expenseMap: Record<string, number> = {};
-    let totalExpense = 0;
-
-    scopedTransactions.forEach((t) => {
-      if (t.type === 'despesa') {
-        expenseMap[t.category] = (expenseMap[t.category] || 0) + t.amount;
-        totalExpense += t.amount;
-      }
-    });
-
-    const COLORS = ['#8b5cf6', '#ec4899', '#3b82f6', '#f59e0b', '#10b981', '#6366f1', '#a855f7', '#64748b'];
-
-    return Object.entries(expenseMap).map(([name, value], idx) => ({
-      name,
-      value,
-      emoji: getCategoryEmoji(name, 'despesa'),
-      percentage: totalExpense > 0 ? Math.round((value / totalExpense) * 100) : 0,
-      color: COLORS[idx % COLORS.length],
-    }));
+    return getCategoryBreakdown(scopedTransactions, 'despesa');
   }, [scopedTransactions]);
 
   // Export current month PDF report
@@ -91,7 +66,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
           <div className="flex items-center gap-2">
             <span className="material-symbols-outlined text-purple-400 text-xl">favorite</span>
             <span className="text-xs font-extrabold uppercase tracking-widest text-purple-300">
-              {user.subtitle}
+              {user.subtitle || 'Finanças do Casal'}
             </span>
           </div>
           <h1 className="text-2xl md:text-3xl font-extrabold text-white tracking-tight">
@@ -155,10 +130,10 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
             </div>
           </div>
           <div className="mt-2">
-            <p className="text-2xl md:text-3xl font-black text-emerald-400 tracking-tight">
+            <p className="text-2xl md:text-3xl font-black text-emerald-400 tracking-tight break-words">
               {formatCurrencyBRL(currentMonthTotals.income)}
             </p>
-            <p className="text-[11px] text-emerald-300/70 mt-1">Entradas do mês selecionado</p>
+            <p className="text-[11px] text-emerald-300/70 mt-1">Entradas acumuladas</p>
           </div>
         </div>
 
@@ -174,14 +149,14 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
             </div>
           </div>
           <div className="mt-2">
-            <p className="text-2xl md:text-3xl font-black text-rose-400 tracking-tight">
+            <p className="text-2xl md:text-3xl font-black text-rose-400 tracking-tight break-words">
               {formatCurrencyBRL(currentMonthTotals.expenses)}
             </p>
-            <p className="text-[11px] text-rose-300/70 mt-1">Saídas do mês selecionado</p>
+            <p className="text-[11px] text-rose-300/70 mt-1">Saídas acumuladas</p>
           </div>
         </div>
 
-        {/* Saldo do Mês Card (Verde para Positivo, Vermelho para Negativo) */}
+        {/* Saldo Atual Card */}
         <div
           className={`glass-card rounded-3xl p-6 relative overflow-hidden flex flex-col justify-between border ${
             currentMonthTotals.balance >= 0
@@ -196,7 +171,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
               }`}
             >
               <span className="material-symbols-outlined text-base">account_balance_wallet</span>
-              Saldo Atual do Mês
+              Saldo Atual
             </span>
             <div
               className={`w-9 h-9 rounded-2xl flex items-center justify-center ${
@@ -212,7 +187,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
           </div>
           <div className="mt-2">
             <p
-              className={`text-2xl md:text-3xl font-black tracking-tight ${
+              className={`text-2xl md:text-3xl font-black tracking-tight break-words ${
                 currentMonthTotals.balance >= 0 ? 'text-emerald-400' : 'text-rose-400'
               }`}
             >
@@ -276,7 +251,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
 
             <p className="text-[11px] text-gray-300 font-medium">
               Gastei <span className="font-bold text-rose-400">{formatCurrencyBRL(currentMonthTotals.expenses)}</span> de{' '}
-              <span className="font-bold text-white">{formatCurrencyBRL(user.totalBudgetGoal || 5000)}</span> do limite do mês.
+              <span className="font-bold text-white">{formatCurrencyBRL(user.totalBudgetGoal || 5000)}</span> do limite.
             </p>
           </div>
 
@@ -303,7 +278,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
 
             <p className="text-[11px] text-gray-300 font-medium">
               Alcançado <span className="font-bold text-emerald-400">{formatCurrencyBRL(currentMonthTotals.income)}</span> de{' '}
-              <span className="font-bold text-white">{formatCurrencyBRL(user.monthlyIncomeGoal || 10000)}</span> da meta planejada.
+              <span className="font-bold text-white">{formatCurrencyBRL(user.monthlyIncomeGoal || 10000)}</span> da meta.
             </p>
           </div>
         </div>
@@ -313,7 +288,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
       <DailyTipCard
         user={user}
         transactions={scopedTransactions}
-        savingsGoal={{ id: '1', title: 'Viagem em Casal', description: 'Férias', currentAmount: 3200, targetAmount: 5000 }}
+        savingsGoal={user.savingsGoal}
         onNavigate={onNavigate}
         onOpenTopUp={() => onNavigate('transactions')}
         onOpenNewTransaction={onOpenNewTransaction}
@@ -414,7 +389,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
               >
                 <div className="flex items-center gap-3 truncate">
                   <div className="w-10 h-10 rounded-xl bg-purple-900/30 border border-purple-500/20 flex items-center justify-center text-lg shrink-0">
-                    {getCategoryEmoji(tx.category, tx.type)}
+                    {tx.type === 'receita' ? '💼' : '🍔'}
                   </div>
 
                   <div className="truncate">
@@ -427,7 +402,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
                   </div>
                 </div>
 
-                <div className="flex items-center gap-3 shrink-0">
+                <div className="flex items-center gap-2 shrink-0">
                   {/* Badge Casal vs Individual */}
                   <span
                     className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${
@@ -446,6 +421,16 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
                   >
                     {tx.type === 'receita' ? '+' : '-'} {formatCurrencyBRL(tx.amount)}
                   </span>
+
+                  {onEditTransaction && (
+                    <button
+                      onClick={() => onEditTransaction(tx)}
+                      className="p-1 text-gray-400 hover:text-purple-300 transition-colors cursor-pointer"
+                      title="Editar lançamento"
+                    >
+                      <span className="material-symbols-outlined text-base">edit</span>
+                    </button>
+                  )}
 
                   <button
                     onClick={() => setDeletingTxId(tx.id)}

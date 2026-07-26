@@ -13,7 +13,16 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
   onUpdateUser,
   onResetData,
 }) => {
-  const [formData, setFormData] = useState<UserProfile>({ ...user });
+  const [formData, setFormData] = useState<UserProfile>({
+    ...user,
+    savingsGoal: user.savingsGoal || {
+      id: '1',
+      title: 'Viagem em Casal',
+      description: 'Férias do Casal',
+      currentAmount: 3200,
+      targetAmount: 5000,
+    },
+  });
   const [savedSuccess, setSavedSuccess] = useState(false);
 
   const handleSubmit = (e: React.FormEvent) => {
@@ -77,7 +86,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
             <div><span className="text-purple-400 font-bold">SUPABASE_ANON_KEY</span> = '{SUPABASE_ANON_KEY !== 'SUA_ANON_KEY_AQUI' ? '••••••••••••••••' : SUPABASE_ANON_KEY}'</div>
           </div>
           <p className="text-[11px] text-gray-400">
-            Para sincronizar seus dados online no Supabase, abra o arquivo <code className="text-purple-300 font-mono">/src/lib/supabase.ts</code> e substitua pelas suas credenciais do projeto.
+            Para sincronizar seus dados online no Supabase, configure a variável de ambiente ou edite <code className="text-purple-300 font-mono">/src/lib/supabase.ts</code>.
           </p>
         </div>
       </div>
@@ -125,7 +134,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
                 type="text"
                 value={formData.partner1Name || ''}
                 onChange={(e) => setFormData({ ...formData, partner1Name: e.target.value })}
-                placeholder="Ex: João"
+                placeholder="Ex: Alex"
                 className="w-full px-4 py-2.5 bg-[#120f24] border border-purple-500/20 rounded-xl text-xs text-white focus:ring-2 focus:ring-purple-500 outline-none"
               />
             </div>
@@ -138,12 +147,12 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
                 type="text"
                 value={formData.partner2Name || ''}
                 onChange={(e) => setFormData({ ...formData, partner2Name: e.target.value })}
-                placeholder="Ex: Maria"
+                placeholder="Ex: Sam"
                 className="w-full px-4 py-2.5 bg-[#120f24] border border-purple-500/20 rounded-xl text-xs text-white focus:ring-2 focus:ring-purple-500 outline-none"
               />
             </div>
 
-            <div className="md:col-span-2">
+            <div>
               <label className="block text-xs font-semibold text-purple-200/80 mb-1">
                 Subtítulo do Aplicativo
               </label>
@@ -151,6 +160,19 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
                 type="text"
                 value={formData.subtitle}
                 onChange={(e) => setFormData({ ...formData, subtitle: e.target.value })}
+                className="w-full px-4 py-2.5 bg-[#120f24] border border-purple-500/20 rounded-xl text-xs text-white focus:ring-2 focus:ring-purple-500 outline-none"
+              />
+            </div>
+
+            <div>
+              <label className="block text-xs font-semibold text-purple-200/80 mb-1">
+                URL da Foto de Perfil (Avatar)
+              </label>
+              <input
+                type="url"
+                value={formData.avatarUrl}
+                onChange={(e) => setFormData({ ...formData, avatarUrl: e.target.value })}
+                placeholder="https://..."
                 className="w-full px-4 py-2.5 bg-[#120f24] border border-purple-500/20 rounded-xl text-xs text-white focus:ring-2 focus:ring-purple-500 outline-none"
               />
             </div>
@@ -172,8 +194,9 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
               <input
                 type="number"
                 step="0.01"
+                min="0"
                 value={formData.totalBudgetGoal}
-                onChange={(e) => setFormData({ ...formData, totalBudgetGoal: parseFloat(e.target.value) || 0 })}
+                onChange={(e) => setFormData({ ...formData, totalBudgetGoal: Math.abs(parseFloat(e.target.value) || 0) })}
                 className="w-full px-4 py-2.5 bg-[#120f24] border border-purple-500/20 rounded-xl text-xs text-white focus:ring-2 focus:ring-purple-500 outline-none"
               />
               <p className="text-[10px] text-gray-400 mt-1">Limite máximo planejado para gastos no mês</p>
@@ -186,11 +209,72 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
               <input
                 type="number"
                 step="0.01"
+                min="0"
                 value={formData.monthlyIncomeGoal}
-                onChange={(e) => setFormData({ ...formData, monthlyIncomeGoal: parseFloat(e.target.value) || 0 })}
+                onChange={(e) => setFormData({ ...formData, monthlyIncomeGoal: Math.abs(parseFloat(e.target.value) || 0) })}
                 className="w-full px-4 py-2.5 bg-[#120f24] border border-purple-500/20 rounded-xl text-xs text-white focus:ring-2 focus:ring-purple-500 outline-none"
               />
               <p className="text-[10px] text-gray-400 mt-1">Meta conjunta de entradas de receitas</p>
+            </div>
+          </div>
+        </div>
+
+        {/* Savings Goal Card */}
+        <div className="glass-card p-6 md:p-8 rounded-3xl border border-purple-500/20 space-y-6">
+          <h3 className="text-base font-bold text-white border-b border-purple-500/20 pb-3 flex items-center gap-2">
+            <span className="material-symbols-outlined text-purple-400">savings</span>
+            Meta de Economia em Dupla
+          </h3>
+
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <div>
+              <label className="block text-xs font-semibold text-purple-200/80 mb-1">
+                Título da Meta de Economia
+              </label>
+              <input
+                type="text"
+                value={formData.savingsGoal?.title || ''}
+                onChange={(e) =>
+                  setFormData({
+                    ...formData,
+                    savingsGoal: {
+                      id: formData.savingsGoal?.id || '1',
+                      description: formData.savingsGoal?.description || 'Objetivo do Casal',
+                      currentAmount: formData.savingsGoal?.currentAmount || 0,
+                      title: e.target.value,
+                      targetAmount: formData.savingsGoal?.targetAmount || 5000,
+                    },
+                  })
+                }
+                placeholder="Ex: Viagem de Férias, Reserva da Casa"
+                className="w-full px-4 py-2.5 bg-[#120f24] border border-purple-500/20 rounded-xl text-xs text-white focus:ring-2 focus:ring-purple-500 outline-none"
+              />
+            </div>
+
+            <div>
+              <label className="block text-xs font-semibold text-purple-200/80 mb-1">
+                Valor Alvo da Meta (R$)
+              </label>
+              <input
+                type="number"
+                step="0.01"
+                min="0"
+                value={formData.savingsGoal?.targetAmount || ''}
+                onChange={(e) =>
+                  setFormData({
+                    ...formData,
+                    savingsGoal: {
+                      id: formData.savingsGoal?.id || '1',
+                      title: formData.savingsGoal?.title || 'Meta do Casal',
+                      description: formData.savingsGoal?.description || 'Objetivo do Casal',
+                      currentAmount: formData.savingsGoal?.currentAmount || 0,
+                      targetAmount: Math.abs(parseFloat(e.target.value) || 0),
+                    },
+                  })
+                }
+                placeholder="Ex: 5000"
+                className="w-full px-4 py-2.5 bg-[#120f24] border border-purple-500/20 rounded-xl text-xs text-white focus:ring-2 focus:ring-purple-500 outline-none"
+              />
             </div>
           </div>
         </div>
