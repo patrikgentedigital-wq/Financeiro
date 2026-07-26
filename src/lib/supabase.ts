@@ -77,16 +77,23 @@ export async function signUpUser(email: string, password: string, name?: string)
       error: { message: 'O Supabase não está configurado. Configure VITE_SUPABASE_URL e VITE_SUPABASE_ANON_KEY.' },
     };
   }
-  const { data, error } = await supabase.auth.signUp({
-    email,
-    password,
-    options: {
-      data: {
-        name: (name || 'Casal').trim().slice(0, 100),
+  try {
+    const { data, error } = await supabase.auth.signUp({
+      email,
+      password,
+      options: {
+        data: {
+          name: (name || 'Casal').trim().slice(0, 100),
+        },
       },
-    },
-  });
-  return { data, error };
+    });
+    return { data, error };
+  } catch (err: any) {
+    return {
+      data: { user: null, session: null },
+      error: { message: err?.message || 'Falha de conexão com o Supabase. Recarregue a página (Ctrl+F5) e tente novamente.' },
+    };
+  }
 }
 
 export async function signInUser(email: string, password: string) {
@@ -96,11 +103,18 @@ export async function signInUser(email: string, password: string) {
       error: { message: 'O Supabase não está configurado. Configure VITE_SUPABASE_URL e VITE_SUPABASE_ANON_KEY.' },
     };
   }
-  const { data, error } = await supabase.auth.signInWithPassword({
-    email,
-    password,
-  });
-  return { data, error };
+  try {
+    const { data, error } = await supabase.auth.signInWithPassword({
+      email,
+      password,
+    });
+    return { data, error };
+  } catch (err: any) {
+    return {
+      data: { user: null, session: null },
+      error: { message: err?.message || 'Falha de conexão com o Supabase. Recarregue a página (Ctrl+F5) e tente novamente.' },
+    };
+  }
 }
 
 export async function signOutUser() {
