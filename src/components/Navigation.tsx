@@ -131,6 +131,7 @@ export const Navigation: React.FC<NavigationProps> = ({
           {/* Nova Transação Button */}
           <button
             onClick={onOpenNewTransaction}
+            aria-label="Abrir formulário de nova transação"
             className="px-4 py-1.5 bg-gradient-to-r from-purple-600 to-indigo-600 text-white font-bold text-xs rounded-xl shadow-lg shadow-purple-900/40 hover:opacity-95 active:scale-95 transition-all cursor-pointer flex items-center gap-1.5"
           >
             <span className="material-symbols-outlined text-base">add</span>
@@ -141,7 +142,8 @@ export const Navigation: React.FC<NavigationProps> = ({
           {onToggleDarkMode && (
             <button
               onClick={onToggleDarkMode}
-              className="p-2 text-purple-200 hover:bg-white/10 rounded-xl transition-all cursor-pointer"
+              aria-label="Alternar modo claro e escuro"
+              className="p-2 text-purple-200 hover:bg-white/10 rounded-xl transition-all cursor-pointer min-w-[40px] min-h-[40px] flex items-center justify-center"
               title="Alternar Modo Claro / Escuro"
             >
               <span className="material-symbols-outlined text-lg">
@@ -154,6 +156,7 @@ export const Navigation: React.FC<NavigationProps> = ({
           <div className="relative">
             <button
               onClick={() => setShowProfileMenu(!showProfileMenu)}
+              aria-label="Abrir menu do perfil do usuário"
               className="w-8 h-8 rounded-full overflow-hidden border-2 border-purple-500/40 hover:border-purple-400 transition-colors cursor-pointer"
             >
               <img src={user.avatarUrl} alt={user.name} className="w-full h-full object-cover" />

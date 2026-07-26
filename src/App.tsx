@@ -18,6 +18,7 @@ import { SettingsView } from './components/SettingsView';
 import { LoginView } from './components/LoginView';
 import { NewTransactionModal } from './components/NewTransactionModal';
 import { ToastContainer } from './components/ToastContainer';
+import { ErrorBoundary } from './components/ErrorBoundary';
 import { calculateSavingsGoalProgress } from './utils/calculations';
 
 export function App() {
@@ -301,44 +302,46 @@ export function App() {
 
       {/* Main Container */}
       <main className="pt-24 pb-20 md:pb-12 max-w-7xl mx-auto px-4 sm:px-6 md:px-8">
-        {currentView === 'dashboard' && (
-          <DashboardView
-            user={activeUser}
-            transactions={transactions}
-            onNavigate={setCurrentView}
-            onOpenNewTransaction={() => {
-              setEditingTransaction(null);
-              setIsNewTxModalOpen(true);
-            }}
-            onDeleteTransaction={handleDeleteTransaction}
-            onEditTransaction={handleOpenEditModal}
-          />
-        )}
+        <ErrorBoundary>
+          {currentView === 'dashboard' && (
+            <DashboardView
+              user={activeUser}
+              transactions={transactions}
+              onNavigate={setCurrentView}
+              onOpenNewTransaction={() => {
+                setEditingTransaction(null);
+                setIsNewTxModalOpen(true);
+              }}
+              onDeleteTransaction={handleDeleteTransaction}
+              onEditTransaction={handleOpenEditModal}
+            />
+          )}
 
-        {currentView === 'transactions' && (
-          <TransactionsView
-            transactions={transactions}
-            onOpenNewTransaction={() => {
-              setEditingTransaction(null);
-              setIsNewTxModalOpen(true);
-            }}
-            onDeleteTransaction={handleDeleteTransaction}
-            onEditTransaction={handleOpenEditModal}
-            initialSearchQuery={globalSearchQuery}
-          />
-        )}
+          {currentView === 'transactions' && (
+            <TransactionsView
+              transactions={transactions}
+              onOpenNewTransaction={() => {
+                setEditingTransaction(null);
+                setIsNewTxModalOpen(true);
+              }}
+              onDeleteTransaction={handleDeleteTransaction}
+              onEditTransaction={handleOpenEditModal}
+              initialSearchQuery={globalSearchQuery}
+            />
+          )}
 
-        {currentView === 'reports' && (
-          <ReportsView transactions={transactions} user={user} />
-        )}
+          {currentView === 'reports' && (
+            <ReportsView transactions={transactions} user={user} />
+          )}
 
-        {currentView === 'settings' && (
-          <SettingsView
-            user={user}
-            onUpdateUser={setUser}
-            onResetData={handleResetData}
-          />
-        )}
+          {currentView === 'settings' && (
+            <SettingsView
+              user={user}
+              onUpdateUser={setUser}
+              onResetData={handleResetData}
+            />
+          )}
+        </ErrorBoundary>
       </main>
 
       {/* New / Edit Transaction Modal */}
