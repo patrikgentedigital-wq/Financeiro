@@ -4,23 +4,26 @@ import { Transaction } from '../types';
 // ============================================================================
 // CONFIGURAÇÃO DO SUPABASE (VIA VARIÁVEIS DE AMBIENTE)
 // ============================================================================
-const envUrl = (import.meta.env.VITE_SUPABASE_URL as string)?.trim();
-const envKey = (import.meta.env.VITE_SUPABASE_ANON_KEY as string)?.trim();
+const rawUrl = (import.meta.env.VITE_SUPABASE_URL as string)?.trim() || '';
+const rawKey = (import.meta.env.VITE_SUPABASE_ANON_KEY as string)?.trim() || '';
+
+const cleanUrl = rawUrl.replace(/^["']|["']$/g, '');
+const cleanKey = rawKey.replace(/^["']|["']$/g, '');
 
 export const SUPABASE_URL =
-  envUrl && envUrl.startsWith('http') && envUrl !== 'SUA_URL_AQUI'
-    ? envUrl
+  cleanUrl && (cleanUrl.startsWith('http://') || cleanUrl.startsWith('https://')) && cleanUrl !== 'SUA_URL_AQUI'
+    ? cleanUrl
     : '';
 
 export const SUPABASE_ANON_KEY =
-  envKey && envKey.length > 10 && envKey !== 'COLE_SUA_PUBLISHABLE_KEY_AQUI'
-    ? envKey
+  cleanKey && cleanKey.length > 10 && cleanKey !== 'COLE_SUA_PUBLISHABLE_KEY_AQUI'
+    ? cleanKey
     : '';
 
 export const isSupabaseConfigured =
   Boolean(SUPABASE_URL) &&
   Boolean(SUPABASE_ANON_KEY) &&
-  SUPABASE_URL.startsWith('http') &&
+  (SUPABASE_URL.startsWith('http://') || SUPABASE_URL.startsWith('https://')) &&
   SUPABASE_ANON_KEY.length > 10;
 
 export const supabase = isSupabaseConfigured
