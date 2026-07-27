@@ -2,17 +2,20 @@ import React, { useState, useEffect } from 'react';
 import { UserProfile, CategoryBudget } from '../types';
 import { SUPABASE_URL, SUPABASE_ANON_KEY, isSupabaseConfigured, saveCategoryBudgetToSupabase } from '../lib/supabase';
 import { EXPENSE_CATEGORIES } from '../data/categories';
+import { isPWAInstallable, promptPWAInstall, isStandalonePWA } from '../utils/pwa';
 
 interface SettingsViewProps {
   user: UserProfile;
   onUpdateUser: (updated: UserProfile) => void;
   onResetData: () => void;
+  pendingSyncCount?: number;
 }
 
 export const SettingsView: React.FC<SettingsViewProps> = ({
   user,
   onUpdateUser,
   onResetData,
+  pendingSyncCount = 0,
 }) => {
   const [formData, setFormData] = useState<UserProfile>({
     ...user,
@@ -25,7 +28,6 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
     },
   });
 
-  // State for Category Budgets
   const [categoryBudgets, setCategoryBudgets] = useState<Record<string, string>>(() => {
     const map: Record<string, string> = {};
     EXPENSE_CATEGORIES.forEach((cat) => {
@@ -36,6 +38,8 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
   });
 
   const [savedSuccess, setSavedSuccess] = useState(false);
+  const [canInstall, setCanInstall] = useState(isPWAInstallable());
+  const [isStandalone, setIsStandalone] = useState(isStandalonePWA());
 
   useEffect(() => {
     setFormData({
@@ -55,16 +59,24 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
       map[cat.name] = existing ? String(existing.limit) : '0';
     });
     setCategoryBudgets(map);
+    setCanInstall(isPWAInstallable());
+    setIsStandalone(isStandalonePWA());
   }, [user]);
 
   const handleBudgetChange = (catName: string, val: string) => {
     setCategoryBudgets((prev) => ({ ...prev, [catName]: val }));
   };
 
+  const handleInstallPWA = async () => {
+    const res = await promptPWAInstall();
+    if (res) {
+      setIsStandalone(true);
+    }
+  };
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
 
-    // Map Category Budgets to list
     const updatedBudgetsList: CategoryBudget[] = [];
     for (const cat of EXPENSE_CATEGORIES) {
       const limitVal = Math.max(0, parseFloat((categoryBudgets[cat.name] || '0').replace(',', '.')) || 0);
@@ -94,7 +106,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
           Configurações da Conta
         </h1>
         <p className="text-xs text-purple-200/70 font-medium mt-1">
-          Ajustes de perfil do casal, limites por categoria e integração com Supabase
+          Ajustes do perfil do casal, status PWA/offline e integração Supabase
         </p>
       </div>
 
@@ -104,6 +116,53 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
           <span>Alterações salvas com sucesso!</span>
         </div>
       )}
+
+      {/* PWA App Status & Manual Install Card */}
+      <div className="glass-card p-6 rounded-3xl border border-purple-500/20 bg-[#120f24] space-y-4">
+        <div className="flex items-center justify-between">
+          <div className="flex items-center gap-2.5">
+            <div className="w-9 h-9 rounded-xl bg-purple-900/40 text-purple-300 flex items-center justify-center border border-purple-500/30">
+              <span className="material-symbols-outlined text-lg">install_mobile</span>
+            </div>
+            <div>
+              <h3 className="text-sm font-bold text-white">Aplicativo PWA e Modo Offline</h3>
+              <p className="text-[11px] text-gray-400">
+                {isStandalone
+                  ? '📱 Executando em modo Aplicativo Standalone'
+                  : '💻 Executando no Navegador Web'}
+              </p>
+            </div>
+          </div>
+
+          {canInstall && !isStandalone && (
+            <button
+              type="button"
+              onClick={handleInstallPWA}
+              className="px-4 py-2 rounded-xl bg-purple-600 hover:bg-purple-500 text-white text-xs font-bold shadow-lg shadow-purple-900/40 transition-all cursor-pointer flex items-center gap-1.5"
+            >
+              <span className="material-symbols-outlined text-base">download</span>
+              <span>Instalar App</span>
+            </button>
+          )}
+        </div>
+
+        {/* Fila Outbox status */}
+        <div className="p-3.5 bg-[#1c1833] rounded-2xl border border-purple-500/10 text-xs flex items-center justify-between">
+          <div className="flex items-center gap-2">
+            <span className="material-symbols-outlined text-purple-400 text-base">sync</span>
+            <span className="text-purple-200/90 font-medium">Fila Outbox Offline:</span>
+          </div>
+          {pendingSyncCount > 0 ? (
+            <span className="px-3 py-0.5 rounded-full text-[11px] font-bold bg-amber-500/20 text-amber-300 border border-amber-500/30">
+              ⏳ {pendingSyncCount} {pendingSyncCount === 1 ? 'transação pendente' : 'transações pendentes'}
+            </span>
+          ) : (
+            <span className="px-3 py-0.5 rounded-full text-[11px] font-bold bg-emerald-500/20 text-emerald-300 border border-emerald-500/30">
+              ✅ Todos os lançamentos sincronizados
+            </span>
+          )}
+        </div>
+      </div>
 
       {/* Supabase Integration Info Card */}
       <div className="glass-card p-6 rounded-3xl border border-purple-500/20 bg-[#120f24] space-y-3">
@@ -203,7 +262,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
           </div>
         </div>
 
-        {/* ORÇAMENTO POR CATEGORIA (Novo painel) */}
+        {/* ORÇAMENTO POR CATEGORIA */}
         <div className="glass-card p-6 md:p-8 rounded-3xl border border-purple-500/20 space-y-6">
           <div className="border-b border-purple-500/20 pb-3 flex items-center justify-between">
             <div className="flex items-center gap-2">

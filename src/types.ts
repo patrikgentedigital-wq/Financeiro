@@ -23,6 +23,9 @@ export interface Transaction {
   recurrenceFrequency?: RecurrenceFrequency;
   recurrenceEndDate?: string | null;
   recurrenceParentId?: string | null; // Id da transação modelo
+
+  // Fila Offline Outbox
+  pendingSync?: boolean;
 }
 
 export interface CategoryBudget {

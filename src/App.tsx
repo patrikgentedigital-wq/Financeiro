@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo } from 'react';
+import { useState, useEffect, useMemo, useCallback } from 'react';
 import { ViewMode, Transaction, UserProfile, ToastNotification, OCCConflict } from './types';
 import { INITIAL_USER, INITIAL_TRANSACTIONS } from './data/initialData';
 import {
@@ -15,6 +15,7 @@ import {
   RealtimePayload,
 } from './lib/supabase';
 import { generateRecurringOccurrences } from './utils/recurring';
+import { initPWAInstallListener } from './utils/pwa';
 import { Navigation } from './components/Navigation';
 import { DashboardView } from './components/DashboardView';
 import { TransactionsView } from './components/TransactionsView';
@@ -25,10 +26,13 @@ import { NewTransactionModal } from './components/NewTransactionModal';
 import { ToastContainer } from './components/ToastContainer';
 import { ErrorBoundary } from './components/ErrorBoundary';
 import { ConflictResolutionModal } from './components/ConflictResolutionModal';
+import { PWAInstallBanner } from './components/PWAInstallBanner';
 import { calculateSavingsGoalProgress } from './utils/calculations';
 
+// Inicializar listener de instalação PWA
+initPWAInstallListener();
+
 export function App() {
-  // Blocking Auth checking state (Item 2)
   const [isAuthChecking, setIsAuthChecking] = useState<boolean>(true);
 
   // User Profile
@@ -44,9 +48,7 @@ export function App() {
     return INITIAL_USER;
   });
 
-  // Persistent auth session check
   const [isAuthenticated, setIsAuthenticated] = useState<boolean>(false);
-
   const [currentView, setCurrentView] = useState<ViewMode>('dashboard');
   const [transactions, setTransactions] = useState<Transaction[]>(() => {
     const saved = localStorage.getItem('financas_casal_txs');
@@ -65,7 +67,7 @@ export function App() {
   const [editingTransaction, setEditingTransaction] = useState<Transaction | null>(null);
   const [toasts, setToasts] = useState<ToastNotification[]>([]);
 
-  // OCC Conflict State (Item 4)
+  // OCC Conflict State
   const [activeConflict, setActiveConflict] = useState<OCCConflict | null>(null);
 
   // Dark Mode State
@@ -130,6 +132,52 @@ export function App() {
     }
   }, [isDarkMode]);
 
+  // Toast Helper
+  const addToast = useCallback((type: 'success' | 'danger' | 'info', message: string) => {
+    const id = `toast-${Date.now()}-${Math.random().toString(36).substr(2, 4)}`;
+    setToasts((prev) => [...prev, { id, type, message }]);
+    setTimeout(() => {
+      setToasts((prev) => prev.filter((t) => t.id !== id));
+    }, 4000);
+  }, []);
+
+  // FILA OFFLINE OUTBOX (Auto-retry na reconexão)
+  const syncPendingOutbox = useCallback(async () => {
+    if (!isSupabaseConfigured || !navigator.onLine) return;
+
+    const pendingTxs = transactions.filter((t) => t.pendingSync);
+    if (pendingTxs.length === 0) return;
+
+    let syncedCount = 0;
+    for (const tx of pendingTxs) {
+      const res = await saveTransactionToSupabase(tx);
+      if (res.success) {
+        syncedCount++;
+        setTransactions((prev) =>
+          prev.map((t) => (t.id === tx.id ? { ...t, pendingSync: false } : t))
+        );
+      }
+    }
+
+    if (syncedCount > 0) {
+      addToast(
+        'success',
+        `⚡ Sincronizados ${syncedCount} ${syncedCount === 1 ? 'lançamento offline' : 'lançamentos offline'} com a nuvem!`
+      );
+    }
+  }, [transactions, addToast]);
+
+  // Listener para evento 'online'
+  useEffect(() => {
+    const handleOnline = () => {
+      syncPendingOutbox();
+    };
+    window.addEventListener('online', handleOnline);
+    return () => {
+      window.removeEventListener('online', handleOnline);
+    };
+  }, [syncPendingOutbox]);
+
   // Persist local user & transactions
   useEffect(() => {
     localStorage.setItem('financas_casal_txs', JSON.stringify(transactions));
@@ -141,7 +189,7 @@ export function App() {
     }
   }, [user, isAuthenticated]);
 
-  // Supabase Paginated Sync & Category Budgets Sync
+  // Supabase Sync & Realtime Listener
   useEffect(() => {
     async function syncSupabase() {
       const cloudTxs = await fetchAllTransactionsFromSupabase();
@@ -158,7 +206,6 @@ export function App() {
     if (isSupabaseConfigured && isAuthenticated) {
       syncSupabase();
 
-      // Incremental Realtime updates
       const unsubscribe = subscribeToTransactionsRealtime((payload: RealtimePayload) => {
         if (payload.eventType === 'INSERT' && payload.newRecord) {
           const item = payload.newRecord;
@@ -216,15 +263,6 @@ export function App() {
     setIsDarkMode((prev) => !prev);
   };
 
-  // Toast Helper
-  const addToast = (type: 'success' | 'danger' | 'info', message: string) => {
-    const id = `toast-${Date.now()}-${Math.random().toString(36).substr(2, 4)}`;
-    setToasts((prev) => [...prev, { id, type, message }]);
-    setTimeout(() => {
-      setToasts((prev) => prev.filter((t) => t.id !== id));
-    }, 4000);
-  };
-
   const handleDismissToast = (id: string) => {
     setToasts((prev) => prev.filter((t) => t.id !== id));
   };
@@ -258,31 +296,38 @@ export function App() {
     }
   };
 
-  // Add new transaction with RECURRENCE GENERATION
+  // Add transaction com suporte a Fila Outbox Offline (pendingSync)
   const handleAddTransaction = async (newTxData: Omit<Transaction, 'id'>) => {
     const mainTxId = typeof crypto !== 'undefined' && crypto.randomUUID
       ? crypto.randomUUID()
       : `tx-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`;
 
+    const isOnline = typeof navigator !== 'undefined' && navigator.onLine;
+
     const newTx: Transaction = {
       ...newTxData,
       id: mainTxId,
       version: 1,
+      pendingSync: !isOnline,
     };
 
     let allGeneratedTxs = [newTx];
 
-    // Se for recorrente, gerar próximas ocorrências no futuro
     if (newTx.isRecurring) {
       const generatedOccurrences = generateRecurringOccurrences(newTx, transactions, 12);
-      allGeneratedTxs = [newTx, ...generatedOccurrences];
+      allGeneratedTxs = [newTx, ...generatedOccurrences.map((t) => ({ ...t, pendingSync: !isOnline }))];
     }
 
     setTransactions((prev) => [...allGeneratedTxs, ...prev]);
 
-    // Save main transaction
-    const res = await saveTransactionToSupabase(newTx);
     const typeLabel = newTx.type === 'receita' ? 'Receita' : 'Despesa';
+
+    if (!isOnline) {
+      addToast('info', `📲 ${typeLabel} "${newTx.description}" salva offline (será sincronizada ao reconectar).`);
+      return;
+    }
+
+    const res = await saveTransactionToSupabase(newTx);
 
     if (allGeneratedTxs.length > 1) {
       await saveTransactionBatchToSupabase(allGeneratedTxs.slice(1));
@@ -291,7 +336,9 @@ export function App() {
     if (res.conflict && res.serverTx) {
       setActiveConflict({ localTx: newTx, serverTx: res.serverTx });
     } else if (isSupabaseConfigured && !res.success) {
-      addToast('info', `✨ ${typeLabel} "${newTx.description}" salva localmente (${res.error || 'nuvem'}).`);
+      // Marcar como pendingSync para retry futuro
+      setTransactions((prev) => prev.map((t) => (t.id === newTx.id ? { ...t, pendingSync: true } : t)));
+      addToast('info', `📲 ${typeLabel} "${newTx.description}" salva no dispositivo (pendente de nuvem).`);
     } else {
       const recLabel = newTx.isRecurring ? ` (com ${allGeneratedTxs.length - 1} repetições geradas)` : '';
       addToast(
@@ -301,12 +348,10 @@ export function App() {
     }
   };
 
-  // Edit existing transaction
   const handleUpdateTransaction = async (updatedTx: Transaction, scope: 'single' | 'future' = 'single') => {
     const parentId = updatedTx.recurrenceParentId || updatedTx.id;
 
     if (updatedTx.isRecurring && scope === 'future') {
-      // Atualizar esta e as futuras
       setTransactions((prev) =>
         prev.map((t) => {
           if ((t.id === parentId || t.recurrenceParentId === parentId) && t.date >= updatedTx.date) {
@@ -329,7 +374,7 @@ export function App() {
     if (res.conflict && res.serverTx) {
       setActiveConflict({ localTx: updatedTx, serverTx: res.serverTx });
     } else if (isSupabaseConfigured && !res.success) {
-      addToast('info', `✏️ Transação "${updatedTx.description}" salva localmente (${res.error || 'nuvem'}).`);
+      addToast('info', `✏️ Transação "${updatedTx.description}" salva localmente.`);
     } else {
       addToast('success', `✏️ Transação "${updatedTx.description}" atualizada!`);
     }
@@ -353,7 +398,6 @@ export function App() {
     addToast('info', `Atualizado para a versão mais recente do servidor.`);
   };
 
-  // Delete transaction with Recurring Scope support
   const handleDeleteTransaction = async (id: string, scope: 'single' | 'future' = 'single') => {
     const txToDelete = transactions.find((t) => t.id === id);
     if (!txToDelete) return;
@@ -361,7 +405,6 @@ export function App() {
     const parentId = txToDelete.recurrenceParentId || txToDelete.id;
 
     if (txToDelete.isRecurring && scope === 'future') {
-      // Excluir esta e as futuras
       setTransactions((prev) =>
         prev.filter((t) => {
           if ((t.id === parentId || t.recurrenceParentId === parentId) && t.date >= txToDelete.date) {
@@ -425,6 +468,10 @@ export function App() {
     };
   }, [user, transactions]);
 
+  const pendingSyncCount = useMemo(() => {
+    return transactions.filter((t) => t.pendingSync).length;
+  }, [transactions]);
+
   return (
     <div className="min-h-screen bg-[#0f0c1b] text-white selection:bg-purple-500 selection:text-white font-['Inter',sans-serif]">
       {/* Navigation Bar */}
@@ -446,6 +493,9 @@ export function App() {
 
       {/* Main Container */}
       <main className="pt-24 pb-20 md:pb-12 max-w-7xl mx-auto px-4 sm:px-6 md:px-8">
+        {/* Banner Customizado de Instalação PWA */}
+        <PWAInstallBanner />
+
         <ErrorBoundary>
           {currentView === 'dashboard' && (
             <DashboardView
@@ -483,6 +533,7 @@ export function App() {
               user={activeUser}
               onUpdateUser={setUser}
               onResetData={handleResetData}
+              pendingSyncCount={pendingSyncCount}
             />
           )}
         </ErrorBoundary>
