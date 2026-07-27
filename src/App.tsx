@@ -4,13 +4,17 @@ import { INITIAL_USER, INITIAL_TRANSACTIONS } from './data/initialData';
 import {
   fetchAllTransactionsFromSupabase,
   saveTransactionToSupabase,
+  saveTransactionBatchToSupabase,
   deleteTransactionFromSupabase,
+  deleteRecurringScopeFromSupabase,
+  fetchCategoryBudgetsFromSupabase,
   subscribeToTransactionsRealtime,
   isSupabaseConfigured,
   supabase,
   signOutUser,
   RealtimePayload,
 } from './lib/supabase';
+import { generateRecurringOccurrences } from './utils/recurring';
 import { Navigation } from './components/Navigation';
 import { DashboardView } from './components/DashboardView';
 import { TransactionsView } from './components/TransactionsView';
@@ -70,14 +74,13 @@ export function App() {
     return saved ? saved === 'dark' : true;
   });
 
-  // Supabase Auth Session Listener & Blocking Check (Item 2)
+  // Supabase Auth Session Listener & Blocking Check
   useEffect(() => {
     if (!supabase) {
       setIsAuthChecking(false);
       return;
     }
 
-    // Blocking initial check
     supabase.auth.getSession().then(({ data: { session } }) => {
       if (session?.user) {
         setIsAuthenticated(true);
@@ -94,7 +97,6 @@ export function App() {
       setIsAuthChecking(false);
     });
 
-    // Listen for auth changes
     const {
       data: { subscription },
     } = supabase.auth.onAuthStateChange((event, session) => {
@@ -139,19 +141,24 @@ export function App() {
     }
   }, [user, isAuthenticated]);
 
-  // Supabase Paginated Sync on load & Incremental Realtime Listener (Items 5 & 6)
+  // Supabase Paginated Sync & Category Budgets Sync
   useEffect(() => {
     async function syncSupabase() {
       const cloudTxs = await fetchAllTransactionsFromSupabase();
       if (cloudTxs && cloudTxs.length > 0) {
         setTransactions(cloudTxs);
       }
+
+      const cloudBudgets = await fetchCategoryBudgetsFromSupabase();
+      if (cloudBudgets && cloudBudgets.length > 0) {
+        setUser((prev) => ({ ...prev, categoryBudgets: cloudBudgets }));
+      }
     }
 
     if (isSupabaseConfigured && isAuthenticated) {
       syncSupabase();
 
-      // Incremental Realtime updates (Item 6)
+      // Incremental Realtime updates
       const unsubscribe = subscribeToTransactionsRealtime((payload: RealtimePayload) => {
         if (payload.eventType === 'INSERT' && payload.newRecord) {
           const item = payload.newRecord;
@@ -166,6 +173,10 @@ export function App() {
             isShared: item.is_shared ?? true,
             paidBy: item.paid_by || 'Casal',
             version: Number(item.version) || 1,
+            isRecurring: Boolean(item.is_recurring),
+            recurrenceFrequency: item.recurrence_frequency,
+            recurrenceEndDate: item.recurrence_end_date,
+            recurrenceParentId: item.recurrence_parent_id,
           };
           setTransactions((prev) => [newTx, ...prev.filter((t) => t.id !== newTx.id)]);
         } else if (payload.eventType === 'UPDATE' && payload.newRecord) {
@@ -183,6 +194,10 @@ export function App() {
               isShared: item.is_shared ?? true,
               paidBy: item.paid_by || 'Casal',
               version: Number(item.version) || 1,
+              isRecurring: Boolean(item.is_recurring),
+              recurrenceFrequency: item.recurrence_frequency,
+              recurrenceEndDate: item.recurrence_end_date,
+              recurrenceParentId: item.recurrence_parent_id,
             };
             setTransactions((prev) => prev.map((t) => (t.id === updatedTx.id ? updatedTx : t)));
           }
@@ -214,7 +229,6 @@ export function App() {
     setToasts((prev) => prev.filter((t) => t.id !== id));
   };
 
-  // Handle Login & Logout
   const handleLogin = (email: string, name?: string) => {
     const updatedUser: UserProfile = {
       ...user,
@@ -237,7 +251,6 @@ export function App() {
     addToast('info', 'Sessão encerrada com sucesso.');
   };
 
-  // Global search input
   const handleSearchChange = (query: string) => {
     setGlobalSearchQuery(query);
     if (query.trim().length > 0 && currentView !== 'transactions') {
@@ -245,34 +258,71 @@ export function App() {
     }
   };
 
-  // Add new transaction using Crypto.randomUUID()
+  // Add new transaction with RECURRENCE GENERATION
   const handleAddTransaction = async (newTxData: Omit<Transaction, 'id'>) => {
+    const mainTxId = typeof crypto !== 'undefined' && crypto.randomUUID
+      ? crypto.randomUUID()
+      : `tx-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`;
+
     const newTx: Transaction = {
       ...newTxData,
-      id: typeof crypto !== 'undefined' && crypto.randomUUID ? crypto.randomUUID() : `tx-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`,
+      id: mainTxId,
       version: 1,
     };
 
-    setTransactions((prev) => [newTx, ...prev]);
+    let allGeneratedTxs = [newTx];
 
+    // Se for recorrente, gerar próximas ocorrências no futuro
+    if (newTx.isRecurring) {
+      const generatedOccurrences = generateRecurringOccurrences(newTx, transactions, 12);
+      allGeneratedTxs = [newTx, ...generatedOccurrences];
+    }
+
+    setTransactions((prev) => [...allGeneratedTxs, ...prev]);
+
+    // Save main transaction
     const res = await saveTransactionToSupabase(newTx);
     const typeLabel = newTx.type === 'receita' ? 'Receita' : 'Despesa';
+
+    if (allGeneratedTxs.length > 1) {
+      await saveTransactionBatchToSupabase(allGeneratedTxs.slice(1));
+    }
 
     if (res.conflict && res.serverTx) {
       setActiveConflict({ localTx: newTx, serverTx: res.serverTx });
     } else if (isSupabaseConfigured && !res.success) {
-      addToast('info', `✨ ${typeLabel} "${newTx.description}" salva localmente (${res.error || 'falha na nuvem'}).`);
+      addToast('info', `✨ ${typeLabel} "${newTx.description}" salva localmente (${res.error || 'nuvem'}).`);
     } else {
+      const recLabel = newTx.isRecurring ? ` (com ${allGeneratedTxs.length - 1} repetições geradas)` : '';
       addToast(
         'success',
-        `✨ ${typeLabel} "${newTx.description}" de R$ ${newTx.amount.toFixed(2)} adicionada!`
+        `✨ ${typeLabel} "${newTx.description}" de R$ ${newTx.amount.toFixed(2)} adicionada!${recLabel}`
       );
     }
   };
 
-  // Edit existing transaction with OCC Conflict handling (Item 4)
-  const handleUpdateTransaction = async (updatedTx: Transaction) => {
-    setTransactions((prev) => prev.map((t) => (t.id === updatedTx.id ? updatedTx : t)));
+  // Edit existing transaction
+  const handleUpdateTransaction = async (updatedTx: Transaction, scope: 'single' | 'future' = 'single') => {
+    const parentId = updatedTx.recurrenceParentId || updatedTx.id;
+
+    if (updatedTx.isRecurring && scope === 'future') {
+      // Atualizar esta e as futuras
+      setTransactions((prev) =>
+        prev.map((t) => {
+          if ((t.id === parentId || t.recurrenceParentId === parentId) && t.date >= updatedTx.date) {
+            return {
+              ...updatedTx,
+              id: t.id,
+              date: t.date,
+              version: (t.version || 1) + 1,
+            };
+          }
+          return t;
+        })
+      );
+    } else {
+      setTransactions((prev) => prev.map((t) => (t.id === updatedTx.id ? updatedTx : t)));
+    }
 
     const res = await saveTransactionToSupabase(updatedTx);
 
@@ -287,11 +337,10 @@ export function App() {
     setEditingTransaction(null);
   };
 
-  // OCC Conflict Resolution Handlers
   const handleKeepLocalConflict = async () => {
     if (!activeConflict) return;
     const { localTx } = activeConflict;
-    await saveTransactionToSupabase(localTx, true); // force overwrite
+    await saveTransactionToSupabase(localTx, true);
     setActiveConflict(null);
     addToast('info', `Sua versão da transação "${localTx.description}" foi mantida.`);
   };
@@ -304,17 +353,32 @@ export function App() {
     addToast('info', `Atualizado para a versão mais recente do servidor.`);
   };
 
-  // Delete transaction
-  const handleDeleteTransaction = async (id: string) => {
+  // Delete transaction with Recurring Scope support
+  const handleDeleteTransaction = async (id: string, scope: 'single' | 'future' = 'single') => {
     const txToDelete = transactions.find((t) => t.id === id);
     if (!txToDelete) return;
 
-    setTransactions((prev) => prev.filter((t) => t.id !== id));
-    await deleteTransactionFromSupabase(id);
-    addToast('danger', `🗑️ Transação "${txToDelete.description}" foi excluída.`);
+    const parentId = txToDelete.recurrenceParentId || txToDelete.id;
+
+    if (txToDelete.isRecurring && scope === 'future') {
+      // Excluir esta e as futuras
+      setTransactions((prev) =>
+        prev.filter((t) => {
+          if ((t.id === parentId || t.recurrenceParentId === parentId) && t.date >= txToDelete.date) {
+            return false;
+          }
+          return true;
+        })
+      );
+      await deleteRecurringScopeFromSupabase(parentId, txToDelete.date, 'future');
+      addToast('danger', `🗑️ Transações futuras de "${txToDelete.description}" foram excluídas.`);
+    } else {
+      setTransactions((prev) => prev.filter((t) => t.id !== id));
+      await deleteTransactionFromSupabase(id);
+      addToast('danger', `🗑️ Transação "${txToDelete.description}" foi excluída.`);
+    }
   };
 
-  // Reset data
   const handleResetData = () => {
     setUser(INITIAL_USER);
     setTransactions(INITIAL_TRANSACTIONS);
@@ -332,7 +396,6 @@ export function App() {
     setEditingTransaction(null);
   };
 
-  // Render blocking loading spinner during auth check (Item 2)
   if (isAuthChecking) {
     return (
       <div className="min-h-screen bg-[#0f0c1b] flex items-center justify-center p-4">
@@ -350,7 +413,6 @@ export function App() {
     return <LoginView onLogin={handleLogin} />;
   }
 
-  // Dynamic user profile calculation with real savings goal progress
   const activeUser: UserProfile = useMemo(() => {
     if (!user.savingsGoal) return user;
     const dynamicCurrent = calculateSavingsGoalProgress(transactions);
@@ -436,7 +498,7 @@ export function App() {
         user={activeUser}
       />
 
-      {/* OCC Concurrency Conflict Resolution Modal (Item 4) */}
+      {/* OCC Concurrency Conflict Resolution Modal */}
       <ConflictResolutionModal
         isOpen={Boolean(activeConflict)}
         localTx={activeConflict?.localTx || null}

@@ -1,4 +1,4 @@
-import { Transaction } from '../types';
+import { Transaction, CategoryBudget } from '../types';
 import { getCategoryEmoji } from '../data/categories';
 
 export interface FinancialTotals {
@@ -21,6 +21,15 @@ export interface MonthlyHistoryItem {
   monthKey: string; // YYYY-MM
   Renda: number;
   Despesas: number;
+}
+
+export interface CategoryBudgetProgressItem {
+  category: string;
+  spent: number;
+  limit: number;
+  percentage: number;
+  status: 'normal' | 'warning' | 'danger'; // normal (<80%), warning (80-100%), danger (>100%)
+  emoji: string;
 }
 
 const CATEGORY_COLORS = [
@@ -160,7 +169,6 @@ export function calculateSavingsGoalProgress(transactions: Transaction[], baseCu
       if (t.type === 'receita') {
         accumulated += amt;
       } else {
-        // Se for despesa de investimento (ex: aporte enviado para poupança), soma ao acumulado
         accumulated += amt;
       }
     }
@@ -169,3 +177,47 @@ export function calculateSavingsGoalProgress(transactions: Transaction[], baseCu
   return roundCurrency(accumulated);
 }
 
+/**
+ * Calculates category budget progress and warning/danger alert levels
+ */
+export function calculateCategoryBudgetProgress(
+  transactions: Transaction[],
+  categoryBudgets: CategoryBudget[]
+): CategoryBudgetProgressItem[] {
+  if (!categoryBudgets || categoryBudgets.length === 0) return [];
+
+  // Consider current month expenses only
+  const currentMonthKey = new Date().toISOString().slice(0, 7);
+
+  const spentMap: Record<string, number> = {};
+  transactions.forEach((t) => {
+    if (t.type === 'despesa' && t.date && t.date.startsWith(currentMonthKey)) {
+      const amt = Math.abs(Number(t.amount) || 0);
+      spentMap[t.category] = (spentMap[t.category] || 0) + amt;
+    }
+  });
+
+  return categoryBudgets
+    .map((b) => {
+      const spent = roundCurrency(spentMap[b.category] || 0);
+      const limit = roundCurrency(b.limit || 0);
+      const percentage = limit > 0 ? Math.round((spent / limit) * 100) : 0;
+
+      let status: 'normal' | 'warning' | 'danger' = 'normal';
+      if (percentage >= 100) {
+        status = 'danger';
+      } else if (percentage >= 80) {
+        status = 'warning';
+      }
+
+      return {
+        category: b.category,
+        spent,
+        limit,
+        percentage,
+        status,
+        emoji: getCategoryEmoji(b.category, 'despesa'),
+      };
+    })
+    .sort((a, b) => b.percentage - a.percentage);
+}

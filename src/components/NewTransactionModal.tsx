@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Transaction, TransactionType, UserProfile } from '../types';
+import { Transaction, TransactionType, UserProfile, RecurrenceFrequency } from '../types';
 import { EXPENSE_CATEGORIES, INCOME_CATEGORIES } from '../data/categories';
 import { FormInput } from './common/FormInput';
 
@@ -31,6 +31,12 @@ export const NewTransactionModal: React.FC<NewTransactionModalProps> = ({
   const [category, setCategory] = useState(EXPENSE_CATEGORIES[0].name);
   const [isShared, setIsShared] = useState(true);
   const [paidBy, setPaidBy] = useState('Casal');
+
+  // Campos de Recorrência
+  const [isRecurring, setIsRecurring] = useState(false);
+  const [recurrenceFrequency, setRecurrenceFrequency] = useState<RecurrenceFrequency>('mensal');
+  const [recurrenceEndDate, setRecurrenceEndDate] = useState('');
+
   const [formError, setFormError] = useState<string | null>(null);
 
   useEffect(() => {
@@ -43,6 +49,9 @@ export const NewTransactionModal: React.FC<NewTransactionModalProps> = ({
       setCategory(initialTx.category || EXPENSE_CATEGORIES[0].name);
       setIsShared(initialTx.isShared ?? true);
       setPaidBy(initialTx.paidBy || 'Casal');
+      setIsRecurring(Boolean(initialTx.isRecurring));
+      setRecurrenceFrequency(initialTx.recurrenceFrequency || 'mensal');
+      setRecurrenceEndDate(initialTx.recurrenceEndDate || '');
     } else {
       setDate(today);
       setDescription('');
@@ -51,6 +60,9 @@ export const NewTransactionModal: React.FC<NewTransactionModalProps> = ({
       setCategory(EXPENSE_CATEGORIES[0].name);
       setIsShared(true);
       setPaidBy('Casal');
+      setIsRecurring(false);
+      setRecurrenceFrequency('mensal');
+      setRecurrenceEndDate('');
     }
   }, [initialTx, isOpen]);
 
@@ -79,27 +91,26 @@ export const NewTransactionModal: React.FC<NewTransactionModalProps> = ({
       return;
     }
 
+    const txPayload = {
+      date: date || today,
+      description: description.trim(),
+      amount: parsedAmount,
+      type,
+      category,
+      isShared,
+      paidBy: paidBy || 'Casal',
+      isRecurring,
+      recurrenceFrequency: isRecurring ? recurrenceFrequency : undefined,
+      recurrenceEndDate: isRecurring && recurrenceEndDate ? recurrenceEndDate : null,
+    };
+
     if (initialTx && onUpdateTransaction) {
       onUpdateTransaction({
         ...initialTx,
-        date: date || today,
-        description: description.trim(),
-        amount: parsedAmount,
-        type,
-        category,
-        isShared,
-        paidBy: paidBy || 'Casal',
+        ...txPayload,
       });
     } else {
-      onAddTransaction({
-        date: date || today,
-        description: description.trim(),
-        amount: parsedAmount,
-        type,
-        category,
-        isShared,
-        paidBy: paidBy || 'Casal',
-      });
+      onAddTransaction(txPayload);
     }
 
     // Reset fields
@@ -107,12 +118,13 @@ export const NewTransactionModal: React.FC<NewTransactionModalProps> = ({
     setAmount('');
     setDate(today);
     setIsShared(true);
+    setIsRecurring(false);
     onClose();
   };
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/70 backdrop-blur-sm animate-in fade-in">
-      <div className="w-full max-w-lg glass-card p-6 md:p-8 rounded-3xl border border-purple-500/20 bg-[#131024]/95 shadow-2xl relative space-y-6">
+      <div className="w-full max-w-lg glass-card p-6 md:p-8 rounded-3xl border border-purple-500/20 bg-[#131024]/95 shadow-2xl relative space-y-6 max-h-[90vh] overflow-y-auto">
         {/* Header */}
         <div className="flex items-center justify-between border-b border-purple-500/10 pb-4">
           <div className="flex items-center gap-3">
@@ -198,7 +210,7 @@ export const NewTransactionModal: React.FC<NewTransactionModalProps> = ({
 
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             <FormInput
-              label="Data *"
+              label="Data da Ocorrência *"
               icon="calendar_today"
               type="date"
               value={date}
@@ -222,6 +234,57 @@ export const NewTransactionModal: React.FC<NewTransactionModalProps> = ({
                 ))}
               </select>
             </div>
+          </div>
+
+          {/* Seção de Recorrência */}
+          <div className="p-4 rounded-2xl bg-[#120f24] border border-purple-500/20 space-y-3">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <span className="material-symbols-outlined text-purple-400 text-base">repeat</span>
+                <span className="text-xs font-semibold text-purple-200">Repetir esta transação (Recorrente)</span>
+              </div>
+              <button
+                type="button"
+                onClick={() => setIsRecurring(!isRecurring)}
+                className={`w-12 h-6 rounded-full transition-colors relative cursor-pointer ${
+                  isRecurring ? 'bg-purple-600' : 'bg-gray-700'
+                }`}
+              >
+                <span
+                  className={`absolute top-1 left-1 w-4 h-4 rounded-full bg-white transition-transform ${
+                    isRecurring ? 'translate-x-6' : 'translate-x-0'
+                  }`}
+                />
+              </button>
+            </div>
+
+            {isRecurring && (
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-3 pt-2 border-t border-purple-500/10 animate-in fade-in">
+                <div>
+                  <label className="block text-xs font-semibold text-purple-200/80 mb-1">
+                    Frequência
+                  </label>
+                  <select
+                    value={recurrenceFrequency}
+                    onChange={(e) => setRecurrenceFrequency(e.target.value as RecurrenceFrequency)}
+                    className="w-full pl-3.5 pr-4 py-2 bg-[#1c1833] border border-purple-500/20 rounded-xl text-xs font-medium text-white outline-none"
+                  >
+                    <option value="mensal">Mensal</option>
+                    <option value="semanal">Semanal</option>
+                    <option value="anual">Anual</option>
+                  </select>
+                </div>
+
+                <FormInput
+                  label="Data Final (Opcional)"
+                  icon="event_busy"
+                  type="date"
+                  value={recurrenceEndDate}
+                  onChange={(e) => setRecurrenceEndDate(e.target.value)}
+                  helperText="Deixe vago para repetir pelos próximos 12 meses."
+                />
+              </div>
+            )}
           </div>
 
           {/* Divisão & Quem Paga */}

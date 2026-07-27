@@ -1,5 +1,5 @@
 import { createClient } from '@supabase/supabase-js';
-import { Transaction } from '../types';
+import { Transaction, CategoryBudget } from '../types';
 
 // ============================================================================
 // CONFIGURAÇÃO DO SUPABASE (VIA VARIÁVEIS DE AMBIENTE SANITIZADAS)
@@ -57,6 +57,11 @@ export function sanitizeAndValidateTx(tx: Partial<Transaction>): { valid: boolea
     return { valid: false, error: 'O valor da transação é inválido ou excede os limites permitidos.' };
   }
 
+  const isRecurring = Boolean(tx.isRecurring);
+  const recurrenceFrequency = tx.recurrenceFrequency || null;
+  const recurrenceEndDate = tx.recurrenceEndDate || null;
+  const recurrenceParentId = tx.recurrenceParentId || null;
+
   return {
     valid: true,
     data: {
@@ -69,6 +74,10 @@ export function sanitizeAndValidateTx(tx: Partial<Transaction>): { valid: boolea
       is_shared: isShared,
       paid_by: paidBy,
       version: currentVersion + 1, // Nova versão esperada
+      is_recurring: isRecurring,
+      recurrence_frequency: recurrenceFrequency,
+      recurrence_end_date: recurrenceEndDate,
+      recurrence_parent_id: recurrenceParentId,
       updated_at: new Date().toISOString(),
     },
   };
@@ -154,10 +163,10 @@ export async function signOutUser() {
 }
 
 // ============================================================================
-// SUPABASE DATA HELPERS (PAGINAÇÃO COMPLETA, OCC RESILIENTE E INCREMENTAL REALTIME)
+// SUPABASE DATA HELPERS (PAGINAÇÃO COMPLETA, RECORRÊNCIA, OCC E ORÇAMENTOS)
 // ============================================================================
 
-// Helper to fetch ALL active transactions across pages iteratively (Item 5)
+// Helper to fetch ALL active transactions across pages iteratively
 export async function fetchAllTransactionsFromSupabase(): Promise<Transaction[] | null> {
   if (!supabase) return null;
   try {
@@ -176,7 +185,7 @@ export async function fetchAllTransactionsFromSupabase(): Promise<Transaction[] 
 
       const { data, error } = await supabase
         .from('transactions')
-        .select('id, date, description, amount, type, category, is_shared, paid_by, user_id, is_deleted, version, couple_id')
+        .select('id, date, description, amount, type, category, is_shared, paid_by, user_id, is_deleted, version, couple_id, is_recurring, recurrence_frequency, recurrence_end_date, recurrence_parent_id')
         .or('is_deleted.eq.false,is_deleted.is.null')
         .order('date', { ascending: false })
         .range(from, to);
@@ -203,6 +212,10 @@ export async function fetchAllTransactionsFromSupabase(): Promise<Transaction[] 
             isDeleted: Boolean(item.is_deleted),
             version: Number(item.version) || 1,
             coupleId: item.couple_id,
+            isRecurring: Boolean(item.is_recurring),
+            recurrenceFrequency: item.recurrence_frequency,
+            recurrenceEndDate: item.recurrence_end_date,
+            recurrenceParentId: item.recurrence_parent_id,
           };
         });
 
@@ -228,7 +241,7 @@ export interface SaveTxResult {
   error?: string;
 }
 
-// Helper to save or update transaction with OCC Concurrency Verification (Item 4)
+// Helper to save or update transaction with OCC Concurrency Verification
 export async function saveTransactionToSupabase(
   tx: Transaction,
   forceOverwrite: boolean = false
@@ -254,14 +267,14 @@ export async function saveTransactionToSupabase(
     // Verificar se já existe
     const { data: existing } = await supabase
       .from('transactions')
-      .select('id, date, description, amount, type, category, is_shared, paid_by, version, couple_id')
+      .select('id, date, description, amount, type, category, is_shared, paid_by, version, couple_id, is_recurring, recurrence_frequency, recurrence_end_date, recurrence_parent_id')
       .eq('id', tx.id)
       .maybeSingle();
 
     if (existing) {
       const serverVersion = Number(existing.version) || 1;
 
-      // OCC CHECK: Se a versão no banco for diferente e não for forceOverwrite, sinaliza CONFLITO!
+      // OCC CHECK
       if (serverVersion !== expectedVersion && !forceOverwrite) {
         const serverTx: Transaction = {
           id: String(existing.id),
@@ -274,6 +287,10 @@ export async function saveTransactionToSupabase(
           paidBy: existing.paid_by,
           version: serverVersion,
           coupleId: existing.couple_id,
+          isRecurring: Boolean(existing.is_recurring),
+          recurrenceFrequency: existing.recurrence_frequency,
+          recurrenceEndDate: existing.recurrence_end_date,
+          recurrenceParentId: existing.recurrence_parent_id,
         };
 
         return {
@@ -284,7 +301,6 @@ export async function saveTransactionToSupabase(
         };
       }
 
-      // Atualizar com a nova versão
       const updatePayload = {
         ...payload,
         version: forceOverwrite ? serverVersion + 1 : expectedVersion + 1,
@@ -308,14 +324,73 @@ export async function saveTransactionToSupabase(
   }
 }
 
-// Helper to perform SOFT DELETE on transaction
-export async function deleteTransactionFromSupabase(id: string): Promise<boolean> {
+// Helper para salvar lote de transações (usado ao gerar ocorrências recorrentes)
+export async function saveTransactionBatchToSupabase(txs: Transaction[]): Promise<boolean> {
+  if (!supabase || txs.length === 0) return false;
+  try {
+    const { data: userData } = await supabase.auth.getUser();
+    const userId = userData?.user?.id;
+    if (!userId) return false;
+
+    const payloads = txs.map((tx) => {
+      const val = sanitizeAndValidateTx(tx);
+      return {
+        ...(val.data || {}),
+        is_deleted: false,
+        user_id: userId,
+      };
+    });
+
+    const { error } = await supabase.from('transactions').upsert(payloads);
+    return !error;
+  } catch (e) {
+    return false;
+  }
+}
+
+// Helper para exclusão condicional de transações recorrentes ("só esta" vs "esta e as futuras")
+export async function deleteRecurringScopeFromSupabase(
+  parentId: string,
+  fromDate: string,
+  scope: 'single' | 'future'
+): Promise<boolean> {
   if (!supabase) return false;
   try {
     const { data: userData } = await supabase.auth.getUser();
     const userId = userData?.user?.id;
     if (!userId) return false;
 
+    const updatePayload = {
+      is_deleted: true,
+      deleted_at: new Date().toISOString(),
+      updated_at: new Date().toISOString(),
+    };
+
+    if (scope === 'single') {
+      const { error } = await supabase
+        .from('transactions')
+        .update(updatePayload)
+        .or(`id.eq.${parentId},recurrence_parent_id.eq.${parentId}`)
+        .eq('date', fromDate);
+      return !error;
+    } else {
+      // Deletar esta e as futuras
+      const { error } = await supabase
+        .from('transactions')
+        .update(updatePayload)
+        .or(`id.eq.${parentId},recurrence_parent_id.eq.${parentId}`)
+        .gte('date', fromDate);
+      return !error;
+    }
+  } catch (err) {
+    return false;
+  }
+}
+
+// Helper to perform SOFT DELETE on transaction
+export async function deleteTransactionFromSupabase(id: string): Promise<boolean> {
+  if (!supabase) return false;
+  try {
     const updatePayload = {
       is_deleted: true,
       deleted_at: new Date().toISOString(),
@@ -333,13 +408,67 @@ export async function deleteTransactionFromSupabase(id: string): Promise<boolean
   }
 }
 
+// ============================================================================
+// ORÇAMENTO POR CATEGORIA (SUPABASE DATA HELPERS)
+// ============================================================================
+export async function fetchCategoryBudgetsFromSupabase(): Promise<CategoryBudget[] | null> {
+  if (!supabase) return null;
+  try {
+    const { data: userData } = await supabase.auth.getUser();
+    const userId = userData?.user?.id;
+    if (!userId) return null;
+
+    const { data, error } = await supabase
+      .from('category_budgets')
+      .select('id, category, limit_amount')
+      .order('category', { ascending: true });
+
+    if (error) return null;
+
+    if (data) {
+      return data.map((b: any) => ({
+        id: b.id,
+        category: b.category,
+        limit: Number(b.limit_amount) || 0,
+      }));
+    }
+  } catch (e) {
+    console.warn('Tabela category_budgets não pronta no banco.');
+  }
+  return null;
+}
+
+export async function saveCategoryBudgetToSupabase(category: string, limitAmount: number): Promise<boolean> {
+  if (!supabase) return false;
+  try {
+    const { data: userData } = await supabase.auth.getUser();
+    const userId = userData?.user?.id;
+    if (!userId) return false;
+
+    const payload = {
+      user_id: userId,
+      category,
+      limit_amount: Math.max(0, Math.round(limitAmount * 100) / 100),
+      updated_at: new Date().toISOString(),
+    };
+
+    const { error } = await supabase
+      .from('category_budgets')
+      .upsert([payload], { onConflict: 'user_id,category' });
+
+    return !error;
+  } catch (e) {
+    return false;
+  }
+}
+
 export type RealtimePayload = {
   eventType: 'INSERT' | 'UPDATE' | 'DELETE';
   newRecord?: any;
   oldRecord?: any;
 };
 
-// Helper for Realtime channel subscription with INCREMENTAL updates (Item 6)
+// Helper for Realtime channel subscription with INCREMENTAL updates
 export function subscribeToTransactionsRealtime(
   onIncrementalChange: (change: RealtimePayload) => void
 ) {

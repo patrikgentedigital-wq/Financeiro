@@ -2,6 +2,8 @@ export type ViewMode = 'dashboard' | 'transactions' | 'reports' | 'settings';
 
 export type TransactionType = 'receita' | 'despesa';
 
+export type RecurrenceFrequency = 'mensal' | 'semanal' | 'anual';
+
 export interface Transaction {
   id: string;
   date: string; // YYYY-MM-DD
@@ -15,6 +17,18 @@ export interface Transaction {
   deletedAt?: string;
   version?: number;
   coupleId?: string;
+
+  // Transações Recorrentes
+  isRecurring?: boolean;
+  recurrenceFrequency?: RecurrenceFrequency;
+  recurrenceEndDate?: string | null;
+  recurrenceParentId?: string | null; // Id da transação modelo
+}
+
+export interface CategoryBudget {
+  id?: string;
+  category: string;
+  limit: number;
 }
 
 export interface SavingsGoal {
@@ -48,7 +62,8 @@ export interface UserProfile {
   avatarUrl: string;
   totalBalance: number;
   monthlyIncomeGoal: number;
-  totalBudgetGoal: number;
+  totalBudgetGoal: number; // Mantido para retrocompatibilidade
+  categoryBudgets?: CategoryBudget[]; // Novo Orçamento por Categoria
   partner1Name?: string;
   partner2Name?: string;
   savingsGoal?: SavingsGoal;
