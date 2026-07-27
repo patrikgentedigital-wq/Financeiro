@@ -14,6 +14,7 @@ export interface Transaction {
   isDeleted?: boolean;
   deletedAt?: string;
   version?: number;
+  coupleId?: string;
 }
 
 export interface SavingsGoal {
@@ -24,7 +25,23 @@ export interface SavingsGoal {
   targetAmount: number;
 }
 
+export interface Couple {
+  id: string;
+  name: string;
+  inviteCode: string;
+  createdAt: string;
+}
+
+export interface CoupleMember {
+  id: string;
+  coupleId: string;
+  userId: string;
+  role: string;
+  joinedAt: string;
+}
+
 export interface UserProfile {
+  id?: string;
   name: string;
   subtitle: string;
   email: string;
@@ -35,10 +52,17 @@ export interface UserProfile {
   partner1Name?: string;
   partner2Name?: string;
   savingsGoal?: SavingsGoal;
+  coupleId?: string;
+  inviteCode?: string;
 }
 
 export interface ToastNotification {
   id: string;
   type: 'success' | 'danger' | 'info';
   message: string;
+}
+
+export interface OCCConflict {
+  localTx: Transaction;
+  serverTx: Transaction;
 }

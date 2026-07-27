@@ -1,51 +1,103 @@
-import React, { useState } from 'react';
-import { signInUser, isSupabaseConfigured } from '../lib/supabase';
+import React, { useState, useEffect } from 'react';
+import { signInUser, signUpUser, isSupabaseConfigured } from '../lib/supabase';
+import { FormInput } from './common/FormInput';
+import { classifyError } from '../utils/errorHandler';
 
 interface LoginViewProps {
   onLogin: (email: string, name?: string) => void;
 }
 
 export const LoginView: React.FC<LoginViewProps> = ({ onLogin }) => {
-  // Form fields (Apenas Login)
+  const [mode, setMode] = useState<'login' | 'signup'>('login');
+
+  // Form fields
+  const [name, setName] = useState('');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
+  const [inviteCode, setInviteCode] = useState('');
   const [showPassword, setShowPassword] = useState(false);
   const [rememberMe, setRememberMe] = useState(true);
+
+  // States
   const [isLoading, setIsLoading] = useState(false);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const [successMsg, setSuccessMsg] = useState<string | null>(null);
 
+  // Lockout / Rate limit client side (Item 8)
+  const [failedAttempts, setFailedAttempts] = useState(0);
+  const [lockoutTimer, setLockoutTimer] = useState(0);
+
+  useEffect(() => {
+    let interval: any;
+    if (lockoutTimer > 0) {
+      interval = setInterval(() => {
+        setLockoutTimer((prev) => prev - 1);
+      }, 1000);
+    }
+    return () => clearInterval(interval);
+  }, [lockoutTimer]);
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (lockoutTimer > 0) return;
+
     setErrorMsg(null);
     setSuccessMsg(null);
 
-    if (!email || !password) {
-      setErrorMsg('Por favor, preencha o e-mail e a senha.');
+    if (!email || !password || (mode === 'signup' && !name)) {
+      setErrorMsg('Por favor, preencha todos os campos obrigatórios.');
+      return;
+    }
+
+    if (password.length < 6) {
+      setErrorMsg('A senha deve ter pelo menos 6 caracteres.');
       return;
     }
 
     setIsLoading(true);
 
     try {
-      const { data, error } = await signInUser(email, password);
-      if (error) {
-        if (error.message?.includes('Invalid login credentials')) {
-          setErrorMsg('E-mail ou senha incorretos. Verifique suas credenciais do Supabase.');
-        } else {
-          setErrorMsg(error.message || 'Erro ao realizar login.');
+      if (mode === 'signup') {
+        const { data, error } = await signUpUser(email, password, name, inviteCode);
+        if (error) {
+          const appErr = classifyError(error);
+          setErrorMsg(appErr.message);
+          setIsLoading(false);
+          return;
         }
-        setIsLoading(false);
-        return;
-      }
 
-      const userName = data.user?.user_metadata?.name || 'Casal';
-      setSuccessMsg('Login realizado com sucesso!');
-      setTimeout(() => {
-        onLogin(email, userName);
-      }, 400);
+        setSuccessMsg('Conta criada com sucesso! Você já pode acessar.');
+        const userName = name || data.user?.user_metadata?.name || 'Casal';
+        setTimeout(() => {
+          onLogin(email, userName);
+        }, 600);
+      } else {
+        const { data, error } = await signInUser(email, password);
+        if (error) {
+          const newFailed = failedAttempts + 1;
+          setFailedAttempts(newFailed);
+          if (newFailed >= 5) {
+            setLockoutTimer(30); // 30s lockout
+            setFailedAttempts(0);
+            setErrorMsg('Muitas tentativas malsucedidas. Por favor, aguarde 30 segundos.');
+          } else {
+            const appErr = classifyError(error);
+            setErrorMsg(appErr.message);
+          }
+          setIsLoading(false);
+          return;
+        }
+
+        setFailedAttempts(0);
+        const userName = data.user?.user_metadata?.name || 'Casal';
+        setSuccessMsg('Login realizado com sucesso!');
+        setTimeout(() => {
+          onLogin(email, userName);
+        }, 400);
+      }
     } catch (err: any) {
-      setErrorMsg(err.message || 'Ocorreu um erro inesperado de conexão.');
+      const appErr = classifyError(err);
+      setErrorMsg(appErr.message);
       setIsLoading(false);
     }
   };
@@ -66,14 +118,18 @@ export const LoginView: React.FC<LoginViewProps> = ({ onLogin }) => {
             Finanças do Casal
           </h1>
           <p className="text-xs text-purple-200/70 font-medium">
-            Acesse a conta do casal cadastrada no Supabase.
+            Gestão financeira compartilhada e transparente para o casal.
           </p>
         </div>
 
         {/* Supabase Status Banner */}
         <div className="flex items-center justify-between p-3 rounded-2xl bg-[#1c1833] border border-purple-500/20 text-xs">
           <div className="flex items-center gap-2">
-            <span className={`w-2.5 h-2.5 rounded-full ${isSupabaseConfigured ? 'bg-emerald-400 animate-pulse' : 'bg-purple-400'}`} />
+            <span
+              className={`w-2.5 h-2.5 rounded-full ${
+                isSupabaseConfigured ? 'bg-emerald-400 animate-pulse' : 'bg-amber-400'
+              }`}
+            />
             <span className="font-semibold text-purple-200">
               {isSupabaseConfigured ? 'Supabase Auth Conectado' : 'Modo Autenticação Local'}
             </span>
@@ -83,12 +139,36 @@ export const LoginView: React.FC<LoginViewProps> = ({ onLogin }) => {
           </span>
         </div>
 
-        {/* Header da Tela de Login */}
-        <div className="text-center pb-1">
-          <h2 className="text-sm font-bold text-white">Entrar com Conta do Supabase</h2>
-          <p className="text-[11px] text-purple-200/60 mt-0.5">
-            Insira o e-mail e senha cadastrados no painel.
-          </p>
+        {/* Auth Mode Toggle Tabs (Item 3) */}
+        <div className="flex bg-[#120f24] p-1.5 rounded-2xl border border-purple-500/20">
+          <button
+            type="button"
+            onClick={() => {
+              setMode('login');
+              setErrorMsg(null);
+            }}
+            className={`flex-1 py-2 rounded-xl text-xs font-bold transition-all cursor-pointer ${
+              mode === 'login'
+                ? 'bg-gradient-to-r from-purple-600 to-indigo-600 text-white shadow-md'
+                : 'text-purple-300/60 hover:text-white'
+            }`}
+          >
+            Entrar
+          </button>
+          <button
+            type="button"
+            onClick={() => {
+              setMode('signup');
+              setErrorMsg(null);
+            }}
+            className={`flex-1 py-2 rounded-xl text-xs font-bold transition-all cursor-pointer ${
+              mode === 'signup'
+                ? 'bg-gradient-to-r from-purple-600 to-indigo-600 text-white shadow-md'
+                : 'text-purple-300/60 hover:text-white'
+            }`}
+          >
+            Criar Conta
+          </button>
         </div>
 
         {/* Error / Success Notifications */}
@@ -106,75 +186,89 @@ export const LoginView: React.FC<LoginViewProps> = ({ onLogin }) => {
           </div>
         )}
 
-        {/* Auth Form (Exclusivo Login) */}
+        {/* Auth Form */}
         <form onSubmit={handleSubmit} className="space-y-4">
-          <div>
-            <label className="block text-xs font-semibold text-purple-200/80 mb-1">
-              E-mail do Casal
-            </label>
-            <div className="relative">
-              <span className="material-symbols-outlined absolute left-3 top-1/2 -translate-y-1/2 text-purple-400 text-[18px]">
-                mail
+          {mode === 'signup' && (
+            <FormInput
+              label="Seu Nome / Nome do Casal *"
+              icon="person"
+              type="text"
+              value={name}
+              onChange={(e) => setName(e.target.value)}
+              placeholder="Ex: Alex & Sam"
+              required
+            />
+          )}
+
+          <FormInput
+            label="E-mail *"
+            icon="mail"
+            type="email"
+            value={email}
+            onChange={(e) => setEmail(e.target.value)}
+            placeholder="seu.email@exemplo.com"
+            required
+          />
+
+          <div className="space-y-1 relative">
+            <FormInput
+              label="Senha *"
+              icon="lock"
+              type={showPassword ? 'text' : 'password'}
+              value={password}
+              onChange={(e) => setPassword(e.target.value)}
+              placeholder="Mínimo 6 caracteres"
+              required
+            />
+            <button
+              type="button"
+              onClick={() => setShowPassword(!showPassword)}
+              aria-label="Alternar visualização da senha"
+              className="absolute right-3 top-7 text-purple-300 hover:text-white cursor-pointer"
+            >
+              <span className="material-symbols-outlined text-[18px]">
+                {showPassword ? 'visibility_off' : 'visibility'}
               </span>
-              <input
-                type="email"
-                value={email}
-                onChange={(e) => setEmail(e.target.value)}
-                placeholder="seu.email@exemplo.com"
-                className="w-full pl-10 pr-4 py-2.5 bg-[#120f24] border border-purple-500/20 rounded-xl text-xs font-medium text-white focus:ring-2 focus:ring-purple-500 outline-none"
-                required
-              />
-            </div>
+            </button>
           </div>
 
-          <div>
-            <label className="block text-xs font-semibold text-purple-200/80 mb-1">
-              Senha
-            </label>
-            <div className="relative">
-              <span className="material-symbols-outlined absolute left-3 top-1/2 -translate-y-1/2 text-purple-400 text-[18px]">
-                lock
-              </span>
-              <input
-                type={showPassword ? 'text' : 'password'}
-                value={password}
-                onChange={(e) => setPassword(e.target.value)}
-                placeholder="Digite sua senha"
-                className="w-full pl-10 pr-10 py-2.5 bg-[#120f24] border border-purple-500/20 rounded-xl text-xs font-medium text-white focus:ring-2 focus:ring-purple-500 outline-none"
-                required
-              />
-              <button
-                type="button"
-                onClick={() => setShowPassword(!showPassword)}
-                aria-label="Alternar visualização da senha"
-                className="absolute right-3 top-1/2 -translate-y-1/2 text-purple-300 hover:text-white"
-              >
-                <span className="material-symbols-outlined text-[18px]">
-                  {showPassword ? 'visibility_off' : 'visibility'}
-                </span>
-              </button>
-            </div>
-          </div>
+          {mode === 'signup' && (
+            <FormInput
+              label="Código de Convite do Casal (Opcional)"
+              icon="diversity_1"
+              type="text"
+              value={inviteCode}
+              onChange={(e) => setInviteCode(e.target.value)}
+              placeholder="Cole o código do seu parceiro"
+              helperText="Deixe em branco para criar um novo grupo de casal."
+            />
+          )}
 
-          <div className="flex items-center justify-between text-xs pt-1">
-            <label className="flex items-center gap-2 cursor-pointer text-purple-200/80">
-              <input
-                type="checkbox"
-                checked={rememberMe}
-                onChange={(e) => setRememberMe(e.target.checked)}
-                className="rounded border-purple-500/30 bg-[#120f24] text-purple-600 focus:ring-purple-500"
-              />
-              Lembrar da sessão
-            </label>
-          </div>
+          {mode === 'login' && (
+            <div className="flex items-center justify-between text-xs pt-1">
+              <label className="flex items-center gap-2 cursor-pointer text-purple-200/80">
+                <input
+                  type="checkbox"
+                  checked={rememberMe}
+                  onChange={(e) => setRememberMe(e.target.checked)}
+                  className="rounded border-purple-500/30 bg-[#120f24] text-purple-600 focus:ring-purple-500"
+                />
+                Lembrar da sessão
+              </label>
+            </div>
+          )}
 
           <button
             type="submit"
-            disabled={isLoading}
-            className="w-full py-3 bg-gradient-to-r from-purple-600 to-indigo-600 text-white font-bold text-xs rounded-xl shadow-lg shadow-purple-900/40 hover:opacity-95 active:scale-95 transition-all flex items-center justify-center gap-2 cursor-pointer"
+            disabled={isLoading || lockoutTimer > 0}
+            className="w-full py-3 bg-gradient-to-r from-purple-600 to-indigo-600 text-white font-bold text-xs rounded-xl shadow-lg shadow-purple-900/40 hover:opacity-95 active:scale-95 transition-all flex items-center justify-center gap-2 cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
           >
             {isLoading ? (
               <span className="material-symbols-outlined animate-spin text-base">progress_activity</span>
+            ) : lockoutTimer > 0 ? (
+              `Aguarde ${lockoutTimer}s`
+            ) : mode === 'signup' ? (
+              'Criar Conta do Casal'
             ) : (
               'Acessar Finanças do Casal'
             )}
@@ -184,7 +278,7 @@ export const LoginView: React.FC<LoginViewProps> = ({ onLogin }) => {
         {/* Security badge */}
         <div className="flex items-center justify-center gap-1.5 text-[10px] text-purple-300/60 pt-2">
           <span className="material-symbols-outlined text-xs text-purple-400">verified_user</span>
-          <span>Acesso restrito a contas autorizadas no Supabase</span>
+          <span>Acesso seguro com autenticação criptografada</span>
         </div>
       </div>
     </div>

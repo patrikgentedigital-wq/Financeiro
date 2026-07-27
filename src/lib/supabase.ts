@@ -2,7 +2,7 @@ import { createClient } from '@supabase/supabase-js';
 import { Transaction } from '../types';
 
 // ============================================================================
-// CONFIGURAÇÃO DO SUPABASE (VIA VARIÁVEIS DE AMBIENTE)
+// CONFIGURAÇÃO DO SUPABASE (VIA VARIÁVEIS DE AMBIENTE SANITIZADAS)
 // ============================================================================
 const rawUrl = (import.meta.env.VITE_SUPABASE_URL as string)?.trim() || '';
 const rawKey = (import.meta.env.VITE_SUPABASE_ANON_KEY as string)?.trim() || '';
@@ -33,13 +33,13 @@ export const supabase = isSupabaseConfigured
 // ============================================================================
 // HELPER PARA SANITIZAÇÃO, PRECISÃO MONETÁRIA E NORMALIZAÇÃO DE TIPOS
 // ============================================================================
-function sanitizeAndValidateTx(tx: Partial<Transaction>): { valid: boolean; data?: any; error?: string } {
+export function sanitizeAndValidateTx(tx: Partial<Transaction>): { valid: boolean; data?: any; error?: string } {
   const description = (tx.description || '').trim().slice(0, 255);
-  // Garante arredondamento exato em duas casas decimais no nível do JS para evitar IEEE 754 float drift
+  // Arredondamento exato em duas casas decimais no JS
   const rawAmount = Math.abs(Number(tx.amount));
   const amount = Math.round(rawAmount * 100) / 100;
-  
-  // Normalização estrita de tipo (Pontos 9)
+
+  // Normalização estrita de tipo
   const rawType = (tx.type || '').toLowerCase();
   const type = rawType === 'receita' || rawType === 'income' ? 'receita' : 'despesa';
 
@@ -75,9 +75,9 @@ function sanitizeAndValidateTx(tx: Partial<Transaction>): { valid: boolean; data
 }
 
 // ============================================================================
-// SUPABASE AUTH HELPERS (SEM FALLBACK FALSO)
+// SUPABASE AUTH HELPERS (CADASTRO, CASAL E SESSÃO)
 // ============================================================================
-export async function signUpUser(email: string, password: string, name?: string) {
+export async function signUpUser(email: string, password: string, name?: string, inviteCode?: string) {
   if (!supabase) {
     return {
       data: { user: null, session: null },
@@ -91,14 +91,37 @@ export async function signUpUser(email: string, password: string, name?: string)
       options: {
         data: {
           name: (name || 'Casal').trim().slice(0, 100),
+          invite_code: (inviteCode || '').trim(),
         },
       },
     });
-    return { data, error };
+
+    if (error) return { data, error };
+
+    // Se houver usuário e inviteCode, associar ao casal existente
+    if (data.user && inviteCode?.trim()) {
+      try {
+        const { data: coupleData } = await supabase
+          .from('couples')
+          .select('id')
+          .eq('invite_code', inviteCode.trim())
+          .single();
+
+        if (coupleData) {
+          await supabase.from('couple_members').insert([
+            { couple_id: coupleData.id, user_id: data.user.id }
+          ]);
+        }
+      } catch (e) {
+        console.warn('Tabelas de casal ainda não migradas no banco Supabase.');
+      }
+    }
+
+    return { data, error: null };
   } catch (err: any) {
     return {
       data: { user: null, session: null },
-      error: { message: err?.message || 'Falha de conexão com o Supabase. Recarregue a página (Ctrl+F5) e tente novamente.' },
+      error: { message: err?.message || 'Falha de conexão ao criar conta.' },
     };
   }
 }
@@ -119,7 +142,7 @@ export async function signInUser(email: string, password: string) {
   } catch (err: any) {
     return {
       data: { user: null, session: null },
-      error: { message: err?.message || 'Falha de conexão com o Supabase. Recarregue a página (Ctrl+F5) e tente novamente.' },
+      error: { message: err?.message || 'Falha de conexão com o Supabase.' },
     };
   }
 }
@@ -131,39 +154,40 @@ export async function signOutUser() {
 }
 
 // ============================================================================
-// SUPABASE DATA HELPERS (PAGINAÇÃO, REAL OCC E NORMALIZAÇÃO ESTRITA)
+// SUPABASE DATA HELPERS (PAGINAÇÃO COMPLETA, OCC RESILIENTE E INCREMENTAL REALTIME)
 // ============================================================================
 
-// Helper to fetch active transactions with pagination support (Ponto 6)
-export async function fetchTransactionsFromSupabase(page: number = 1, limit: number = 100): Promise<Transaction[] | null> {
+// Helper to fetch ALL active transactions across pages iteratively (Item 5)
+export async function fetchAllTransactionsFromSupabase(): Promise<Transaction[] | null> {
   if (!supabase) return null;
   try {
     const { data: userData } = await supabase.auth.getUser();
     const userId = userData?.user?.id;
+    if (!userId) return null;
 
-    if (!userId) return null; // Exige usuário autenticado para RLS estrito (Ponto 2)
+    let allTransactions: Transaction[] = [];
+    let page = 0;
+    const pageSize = 100;
+    let hasMore = true;
 
-    const from = (page - 1) * limit;
-    const to = from + limit - 1;
+    while (hasMore) {
+      const from = page * pageSize;
+      const to = from + pageSize - 1;
 
-    const { data, error } = await supabase
-      .from('transactions')
-      .select('id, date, description, amount, type, category, is_shared, paid_by, user_id, is_deleted, version')
-      .eq('user_id', userId) // RLS estrito: apenas linhas do proprietário (Ponto 2)
-      .or('is_deleted.eq.false,is_deleted.is.null')
-      .order('date', { ascending: false })
-      .range(from, to); // Paginação de banco de dados (Ponto 6)
+      const { data, error } = await supabase
+        .from('transactions')
+        .select('id, date, description, amount, type, category, is_shared, paid_by, user_id, is_deleted, version, couple_id')
+        .or('is_deleted.eq.false,is_deleted.is.null')
+        .order('date', { ascending: false })
+        .range(from, to);
 
-    if (error) {
-      console.warn('Falha ao carregar dados remotos do Supabase.');
-      return null;
-    }
+      if (error) {
+        console.warn('Falha na busca paginada de transações.');
+        break;
+      }
 
-    if (data && data.length > 0) {
-      return data
-        .filter((item: any) => !item.is_deleted)
-        .map((item: any) => {
-          // Normalização estrita de tipo (Ponto 9)
+      if (data && data.length > 0) {
+        const mapped = data.map((item: any) => {
           const rawType = (item.type || '').toLowerCase();
           const normalizedType = rawType === 'income' || rawType === 'receita' ? 'receita' : 'despesa';
 
@@ -171,36 +195,54 @@ export async function fetchTransactionsFromSupabase(page: number = 1, limit: num
             id: String(item.id),
             date: item.date,
             description: item.description,
-            amount: Math.round(Math.abs(Number(item.amount)) * 100) / 100, // Arredondamento exato
+            amount: Math.round(Math.abs(Number(item.amount)) * 100) / 100,
             type: normalizedType,
             category: item.category || 'Outros',
             isShared: item.is_shared ?? true,
             paidBy: item.paid_by || 'Casal',
             isDeleted: Boolean(item.is_deleted),
             version: Number(item.version) || 1,
+            coupleId: item.couple_id,
           };
         });
+
+        allTransactions = [...allTransactions, ...mapped];
+        hasMore = data.length === pageSize;
+        page++;
+      } else {
+        hasMore = false;
+      }
     }
+
+    return allTransactions;
   } catch (err) {
-    console.warn('Falha na comunicação de rede com o banco de dados.');
+    console.warn('Erro de rede ao buscar histórico de transações.');
   }
   return null;
 }
 
-// Helper to save or update transaction with REAL OCC Concurrency Verification (Ponto 1)
-export async function saveTransactionToSupabase(tx: Transaction): Promise<boolean> {
-  if (!supabase) return false;
+export interface SaveTxResult {
+  success: boolean;
+  conflict?: boolean;
+  serverTx?: Transaction;
+  error?: string;
+}
+
+// Helper to save or update transaction with OCC Concurrency Verification (Item 4)
+export async function saveTransactionToSupabase(
+  tx: Transaction,
+  forceOverwrite: boolean = false
+): Promise<SaveTxResult> {
+  if (!supabase) return { success: false, error: 'Supabase não configurado.' };
   try {
     const validation = sanitizeAndValidateTx(tx);
     if (!validation.valid || !validation.data) {
-      console.warn('Tentativa de salvar transação inválida:', validation.error);
-      return false;
+      return { success: false, error: validation.error || 'Transação inválida.' };
     }
 
     const { data: userData } = await supabase.auth.getUser();
     const userId = userData?.user?.id;
-
-    if (!userId) return false;
+    if (!userId) return { success: false, error: 'Usuário não autenticado.' };
 
     const expectedVersion = tx.version || 1;
     const payload = {
@@ -209,53 +251,69 @@ export async function saveTransactionToSupabase(tx: Transaction): Promise<boolea
       user_id: userId,
     };
 
-    // Se a transação já existe, fazemos UPDATE com verificação estrita da versão anterior (REAL OCC)
+    // Verificar se já existe
     const { data: existing } = await supabase
       .from('transactions')
-      .select('id, version')
+      .select('id, date, description, amount, type, category, is_shared, paid_by, version, couple_id')
       .eq('id', tx.id)
       .maybeSingle();
 
     if (existing) {
-      // OCC CHECK: Se a versão no banco não for exatamente a versão que o cliente carregou, rejeita!
-      if (Number(existing.version) !== expectedVersion) {
-        console.warn(`[OCC CONFLICT] A transação ${tx.id} foi alterada por outro usuário (versão no banco: ${existing.version}, versão local: ${expectedVersion}). Alteração rejeitada.`);
-        return false;
+      const serverVersion = Number(existing.version) || 1;
+
+      // OCC CHECK: Se a versão no banco for diferente e não for forceOverwrite, sinaliza CONFLITO!
+      if (serverVersion !== expectedVersion && !forceOverwrite) {
+        const serverTx: Transaction = {
+          id: String(existing.id),
+          date: existing.date,
+          description: existing.description,
+          amount: Number(existing.amount),
+          type: existing.type === 'income' || existing.type === 'receita' ? 'receita' : 'despesa',
+          category: existing.category,
+          isShared: existing.is_shared,
+          paidBy: existing.paid_by,
+          version: serverVersion,
+          coupleId: existing.couple_id,
+        };
+
+        return {
+          success: false,
+          conflict: true,
+          serverTx,
+          error: 'Conflito de concorrência OCC: Esta transação foi editada por outro parceiro.',
+        };
       }
 
-      const { error, count } = await supabase
+      // Atualizar com a nova versão
+      const updatePayload = {
+        ...payload,
+        version: forceOverwrite ? serverVersion + 1 : expectedVersion + 1,
+      };
+
+      const { error } = await supabase
         .from('transactions')
-        .update(payload)
-        .eq('id', tx.id)
-        .eq('version', expectedVersion); // Verificação OCC no WHERE
+        .update(updatePayload)
+        .eq('id', tx.id);
 
-      if (error || (count !== null && count === 0)) {
-        console.warn('[OCC CONFLICT] Falha ao atualizar transação concorrente.');
-        return false;
-      }
+      if (error) return { success: false, error: error.message };
     } else {
-      // Nova transação (INSERT)
+      // Inserção nova
       const { error } = await supabase.from('transactions').insert([payload]);
-      if (error) {
-        console.warn('Falha na inserção da transação remota.');
-        return false;
-      }
+      if (error) return { success: false, error: error.message };
     }
 
-    return true;
-  } catch (err) {
-    console.warn('Erro ao processar envio de dados.');
-    return false;
+    return { success: true };
+  } catch (err: any) {
+    return { success: false, error: err?.message || 'Erro ao processar salvamento.' };
   }
 }
 
-// Helper to perform SOFT DELETE on transaction in Supabase securely
+// Helper to perform SOFT DELETE on transaction
 export async function deleteTransactionFromSupabase(id: string): Promise<boolean> {
   if (!supabase) return false;
   try {
     const { data: userData } = await supabase.auth.getUser();
     const userId = userData?.user?.id;
-
     if (!userId) return false;
 
     const updatePayload = {
@@ -267,27 +325,33 @@ export async function deleteTransactionFromSupabase(id: string): Promise<boolean
     const { error } = await supabase
       .from('transactions')
       .update(updatePayload)
-      .eq('id', id)
-      .eq('user_id', userId); // RLS / IDOR check
+      .eq('id', id);
 
-    if (error) {
-      console.warn('Falha no arquivamento seguro da transação remota.');
-      return false;
-    }
-    return true;
+    return !error;
   } catch (err) {
-    console.warn('Erro de rede ao arquivar transação.');
     return false;
   }
 }
 
-// Helper for Realtime channel subscription
-export function subscribeToTransactionsRealtime(onDataChanged: () => void) {
+export type RealtimePayload = {
+  eventType: 'INSERT' | 'UPDATE' | 'DELETE';
+  newRecord?: any;
+  oldRecord?: any;
+};
+
+// Helper for Realtime channel subscription with INCREMENTAL updates (Item 6)
+export function subscribeToTransactionsRealtime(
+  onIncrementalChange: (change: RealtimePayload) => void
+) {
   if (!supabase) return null;
   const channel = supabase
     .channel('public:transactions')
-    .on('postgres_changes', { event: '*', schema: 'public', table: 'transactions' }, () => {
-      onDataChanged();
+    .on('postgres_changes', { event: '*', schema: 'public', table: 'transactions' }, (payload: any) => {
+      onIncrementalChange({
+        eventType: payload.eventType,
+        newRecord: payload.new,
+        oldRecord: payload.old,
+      });
     })
     .subscribe();
 

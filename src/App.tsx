@@ -1,14 +1,15 @@
 import { useState, useEffect, useMemo } from 'react';
-import { ViewMode, Transaction, UserProfile, ToastNotification } from './types';
+import { ViewMode, Transaction, UserProfile, ToastNotification, OCCConflict } from './types';
 import { INITIAL_USER, INITIAL_TRANSACTIONS } from './data/initialData';
 import {
-  fetchTransactionsFromSupabase,
+  fetchAllTransactionsFromSupabase,
   saveTransactionToSupabase,
   deleteTransactionFromSupabase,
   subscribeToTransactionsRealtime,
   isSupabaseConfigured,
   supabase,
   signOutUser,
+  RealtimePayload,
 } from './lib/supabase';
 import { Navigation } from './components/Navigation';
 import { DashboardView } from './components/DashboardView';
@@ -19,10 +20,14 @@ import { LoginView } from './components/LoginView';
 import { NewTransactionModal } from './components/NewTransactionModal';
 import { ToastContainer } from './components/ToastContainer';
 import { ErrorBoundary } from './components/ErrorBoundary';
+import { ConflictResolutionModal } from './components/ConflictResolutionModal';
 import { calculateSavingsGoalProgress } from './utils/calculations';
 
 export function App() {
-  // Load saved user profile or fallback
+  // Blocking Auth checking state (Item 2)
+  const [isAuthChecking, setIsAuthChecking] = useState<boolean>(true);
+
+  // User Profile
   const [user, setUser] = useState<UserProfile>(() => {
     const saved = localStorage.getItem('financas_casal_user');
     if (saved) {
@@ -36,10 +41,7 @@ export function App() {
   });
 
   // Persistent auth session check
-  const [isAuthenticated, setIsAuthenticated] = useState<boolean>(() => {
-    const savedUser = localStorage.getItem('financas_casal_user');
-    return Boolean(savedUser);
-  });
+  const [isAuthenticated, setIsAuthenticated] = useState<boolean>(false);
 
   const [currentView, setCurrentView] = useState<ViewMode>('dashboard');
   const [transactions, setTransactions] = useState<Transaction[]>(() => {
@@ -59,26 +61,37 @@ export function App() {
   const [editingTransaction, setEditingTransaction] = useState<Transaction | null>(null);
   const [toasts, setToasts] = useState<ToastNotification[]>([]);
 
+  // OCC Conflict State (Item 4)
+  const [activeConflict, setActiveConflict] = useState<OCCConflict | null>(null);
+
   // Dark Mode State
   const [isDarkMode, setIsDarkMode] = useState<boolean>(() => {
     const saved = localStorage.getItem('financas_casal_theme');
     return saved ? saved === 'dark' : true;
   });
 
-  // Supabase Auth Session Listener & Initial Check
+  // Supabase Auth Session Listener & Blocking Check (Item 2)
   useEffect(() => {
-    if (!supabase) return;
+    if (!supabase) {
+      setIsAuthChecking(false);
+      return;
+    }
 
-    // Get current session
+    // Blocking initial check
     supabase.auth.getSession().then(({ data: { session } }) => {
       if (session?.user) {
         setIsAuthenticated(true);
         const userEmail = session.user.email || 'casal@financasdocasal.app';
         const userName = session.user.user_metadata?.name || 'Alex & Sam';
-        const updatedUser = { ...user, email: userEmail, name: userName };
+        const updatedUser = { ...user, id: session.user.id, email: userEmail, name: userName };
         setUser(updatedUser);
         localStorage.setItem('financas_casal_user', JSON.stringify(updatedUser));
+      } else {
+        setIsAuthenticated(false);
       }
+      setIsAuthChecking(false);
+    }).catch(() => {
+      setIsAuthChecking(false);
     });
 
     // Listen for auth changes
@@ -89,7 +102,7 @@ export function App() {
         setIsAuthenticated(true);
         const userEmail = session.user.email || 'casal@financasdocasal.app';
         const userName = session.user.user_metadata?.name || 'Alex & Sam';
-        const updatedUser = { ...user, email: userEmail, name: userName };
+        const updatedUser = { ...user, id: session.user.id, email: userEmail, name: userName };
         setUser(updatedUser);
         localStorage.setItem('financas_casal_user', JSON.stringify(updatedUser));
       } else if (event === 'SIGNED_OUT') {
@@ -126,25 +139,63 @@ export function App() {
     }
   }, [user, isAuthenticated]);
 
-  // Attempt Supabase Sync on load & set up Realtime listener
+  // Supabase Paginated Sync on load & Incremental Realtime Listener (Items 5 & 6)
   useEffect(() => {
     async function syncSupabase() {
-      const cloudTxs = await fetchTransactionsFromSupabase();
+      const cloudTxs = await fetchAllTransactionsFromSupabase();
       if (cloudTxs && cloudTxs.length > 0) {
         setTransactions(cloudTxs);
       }
     }
 
-    if (isSupabaseConfigured) {
+    if (isSupabaseConfigured && isAuthenticated) {
       syncSupabase();
-      const unsubscribe = subscribeToTransactionsRealtime(() => {
-        syncSupabase();
+
+      // Incremental Realtime updates (Item 6)
+      const unsubscribe = subscribeToTransactionsRealtime((payload: RealtimePayload) => {
+        if (payload.eventType === 'INSERT' && payload.newRecord) {
+          const item = payload.newRecord;
+          if (item.is_deleted) return;
+          const newTx: Transaction = {
+            id: String(item.id),
+            date: item.date,
+            description: item.description,
+            amount: Math.abs(Number(item.amount)),
+            type: item.type === 'income' || item.type === 'receita' ? 'receita' : 'despesa',
+            category: item.category || 'Outros',
+            isShared: item.is_shared ?? true,
+            paidBy: item.paid_by || 'Casal',
+            version: Number(item.version) || 1,
+          };
+          setTransactions((prev) => [newTx, ...prev.filter((t) => t.id !== newTx.id)]);
+        } else if (payload.eventType === 'UPDATE' && payload.newRecord) {
+          const item = payload.newRecord;
+          if (item.is_deleted) {
+            setTransactions((prev) => prev.filter((t) => t.id !== String(item.id)));
+          } else {
+            const updatedTx: Transaction = {
+              id: String(item.id),
+              date: item.date,
+              description: item.description,
+              amount: Math.abs(Number(item.amount)),
+              type: item.type === 'income' || item.type === 'receita' ? 'receita' : 'despesa',
+              category: item.category || 'Outros',
+              isShared: item.is_shared ?? true,
+              paidBy: item.paid_by || 'Casal',
+              version: Number(item.version) || 1,
+            };
+            setTransactions((prev) => prev.map((t) => (t.id === updatedTx.id ? updatedTx : t)));
+          }
+        } else if (payload.eventType === 'DELETE' && payload.oldRecord) {
+          setTransactions((prev) => prev.filter((t) => t.id !== String(payload.oldRecord.id)));
+        }
       });
+
       return () => {
         if (unsubscribe) unsubscribe();
       };
     }
-  }, []);
+  }, [isAuthenticated]);
 
   const handleToggleDarkMode = () => {
     setIsDarkMode((prev) => !prev);
@@ -179,7 +230,6 @@ export function App() {
   const handleLogout = async () => {
     await signOutUser();
     setIsAuthenticated(false);
-    // Limpeza completa do localStorage no logout (Pontos 3 e 8)
     localStorage.removeItem('financas_casal_user');
     localStorage.removeItem('financas_casal_txs');
     localStorage.removeItem('financas_casal_theme');
@@ -195,7 +245,7 @@ export function App() {
     }
   };
 
-  // Add new transaction using Crypto.randomUUID() (Ponto 4)
+  // Add new transaction using Crypto.randomUUID()
   const handleAddTransaction = async (newTxData: Omit<Transaction, 'id'>) => {
     const newTx: Transaction = {
       ...newTxData,
@@ -205,12 +255,13 @@ export function App() {
 
     setTransactions((prev) => [newTx, ...prev]);
 
-    // Save to Supabase if configured & check result
-    const savedOnCloud = await saveTransactionToSupabase(newTx);
+    const res = await saveTransactionToSupabase(newTx);
     const typeLabel = newTx.type === 'receita' ? 'Receita' : 'Despesa';
 
-    if (isSupabaseConfigured && !savedOnCloud) {
-      addToast('info', `✨ ${typeLabel} "${newTx.description}" salva localmente (falha na nuvem ou conflito).`);
+    if (res.conflict && res.serverTx) {
+      setActiveConflict({ localTx: newTx, serverTx: res.serverTx });
+    } else if (isSupabaseConfigured && !res.success) {
+      addToast('info', `✨ ${typeLabel} "${newTx.description}" salva localmente (${res.error || 'falha na nuvem'}).`);
     } else {
       addToast(
         'success',
@@ -219,19 +270,38 @@ export function App() {
     }
   };
 
-  // Edit existing transaction
+  // Edit existing transaction with OCC Conflict handling (Item 4)
   const handleUpdateTransaction = async (updatedTx: Transaction) => {
     setTransactions((prev) => prev.map((t) => (t.id === updatedTx.id ? updatedTx : t)));
 
-    // Update in Supabase
-    const savedOnCloud = await saveTransactionToSupabase(updatedTx);
-    if (isSupabaseConfigured && !savedOnCloud) {
-      addToast('info', `✏️ Transação "${updatedTx.description}" atualizada localmente.`);
+    const res = await saveTransactionToSupabase(updatedTx);
+
+    if (res.conflict && res.serverTx) {
+      setActiveConflict({ localTx: updatedTx, serverTx: res.serverTx });
+    } else if (isSupabaseConfigured && !res.success) {
+      addToast('info', `✏️ Transação "${updatedTx.description}" salva localmente (${res.error || 'nuvem'}).`);
     } else {
       addToast('success', `✏️ Transação "${updatedTx.description}" atualizada!`);
     }
 
     setEditingTransaction(null);
+  };
+
+  // OCC Conflict Resolution Handlers
+  const handleKeepLocalConflict = async () => {
+    if (!activeConflict) return;
+    const { localTx } = activeConflict;
+    await saveTransactionToSupabase(localTx, true); // force overwrite
+    setActiveConflict(null);
+    addToast('info', `Sua versão da transação "${localTx.description}" foi mantida.`);
+  };
+
+  const handleUseServerConflict = () => {
+    if (!activeConflict) return;
+    const { serverTx } = activeConflict;
+    setTransactions((prev) => prev.map((t) => (t.id === serverTx.id ? serverTx : t)));
+    setActiveConflict(null);
+    addToast('info', `Atualizado para a versão mais recente do servidor.`);
   };
 
   // Delete transaction
@@ -240,10 +310,7 @@ export function App() {
     if (!txToDelete) return;
 
     setTransactions((prev) => prev.filter((t) => t.id !== id));
-
-    // Delete from Supabase if configured
     await deleteTransactionFromSupabase(id);
-
     addToast('danger', `🗑️ Transação "${txToDelete.description}" foi excluída.`);
   };
 
@@ -265,11 +332,25 @@ export function App() {
     setEditingTransaction(null);
   };
 
+  // Render blocking loading spinner during auth check (Item 2)
+  if (isAuthChecking) {
+    return (
+      <div className="min-h-screen bg-[#0f0c1b] flex items-center justify-center p-4">
+        <div className="flex flex-col items-center gap-3 text-purple-300">
+          <span className="material-symbols-outlined text-4xl animate-spin text-purple-400">
+            progress_activity
+          </span>
+          <p className="text-xs font-semibold tracking-wide">Validando sessão do casal...</p>
+        </div>
+      </div>
+    );
+  }
+
   if (!isAuthenticated) {
     return <LoginView onLogin={handleLogin} />;
   }
 
-  // Dynamic user profile calculation with real savings goal progress (Ponto 7)
+  // Dynamic user profile calculation with real savings goal progress
   const activeUser: UserProfile = useMemo(() => {
     if (!user.savingsGoal) return user;
     const dynamicCurrent = calculateSavingsGoalProgress(transactions);
@@ -289,6 +370,7 @@ export function App() {
         currentView={currentView}
         onNavigate={setCurrentView}
         user={activeUser}
+        transactions={transactions}
         onOpenNewTransaction={() => {
           setEditingTransaction(null);
           setIsNewTxModalOpen(true);
@@ -331,12 +413,12 @@ export function App() {
           )}
 
           {currentView === 'reports' && (
-            <ReportsView transactions={transactions} user={user} />
+            <ReportsView transactions={transactions} user={activeUser} />
           )}
 
           {currentView === 'settings' && (
             <SettingsView
-              user={user}
+              user={activeUser}
               onUpdateUser={setUser}
               onResetData={handleResetData}
             />
@@ -351,7 +433,17 @@ export function App() {
         onAddTransaction={handleAddTransaction}
         onUpdateTransaction={handleUpdateTransaction}
         initialTx={editingTransaction}
-        user={user}
+        user={activeUser}
+      />
+
+      {/* OCC Concurrency Conflict Resolution Modal (Item 4) */}
+      <ConflictResolutionModal
+        isOpen={Boolean(activeConflict)}
+        localTx={activeConflict?.localTx || null}
+        serverTx={activeConflict?.serverTx || null}
+        onKeepLocal={handleKeepLocalConflict}
+        onUseServer={handleUseServerConflict}
+        onCancel={() => setActiveConflict(null)}
       />
 
       {/* Toast Notifications */}
