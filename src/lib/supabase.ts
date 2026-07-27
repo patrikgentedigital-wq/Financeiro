@@ -10,12 +10,12 @@ const envKey = (import.meta.env.VITE_SUPABASE_ANON_KEY as string)?.trim();
 export const SUPABASE_URL =
   envUrl && envUrl.startsWith('http') && envUrl !== 'SUA_URL_AQUI'
     ? envUrl
-    : 'https://litugojwlmlvmtrmflgg.supabase.co';
+    : '';
 
 export const SUPABASE_ANON_KEY =
   envKey && envKey.length > 10 && envKey !== 'COLE_SUA_PUBLISHABLE_KEY_AQUI'
     ? envKey
-    : 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImxpdHVnb2p3bG1sdm10cm1mbGdnIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODQyOTQyNTAsImV4cCI6MjA5OTg3MDI1MH0.8kf2Zpl3QN05CxnqHEXmiIGXUxk-mvOJpNExTATRs2Y';
+    : '';
 
 export const isSupabaseConfigured =
   Boolean(SUPABASE_URL) &&
