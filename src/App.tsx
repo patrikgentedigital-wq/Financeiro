@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo, useCallback } from 'react';
+import React, { useState, useEffect, useMemo, useCallback, Suspense } from 'react';
 import { ViewMode, Transaction, UserProfile, ToastNotification, OCCConflict } from './types';
 import { INITIAL_USER, INITIAL_TRANSACTIONS } from './data/initialData';
 import {
@@ -18,16 +18,27 @@ import { generateRecurringOccurrences } from './utils/recurring';
 import { initPWAInstallListener } from './utils/pwa';
 import { Navigation } from './components/Navigation';
 import { DashboardView } from './components/DashboardView';
-import { TransactionsView } from './components/TransactionsView';
-import { ReportsView } from './components/ReportsView';
-import { SettingsView } from './components/SettingsView';
 import { LoginView } from './components/LoginView';
-import { NewTransactionModal } from './components/NewTransactionModal';
 import { ToastContainer } from './components/ToastContainer';
 import { ErrorBoundary } from './components/ErrorBoundary';
 import { ConflictResolutionModal } from './components/ConflictResolutionModal';
 import { PWAInstallBanner } from './components/PWAInstallBanner';
+import { ViewSkeleton } from './components/ViewSkeleton';
 import { calculateSavingsGoalProgress } from './utils/calculations';
+
+// Lazy-loaded Views e Modal (preservando named exports via .then)
+const TransactionsView = React.lazy(() =>
+  import('./components/TransactionsView').then((m) => ({ default: m.TransactionsView }))
+);
+const ReportsView = React.lazy(() =>
+  import('./components/ReportsView').then((m) => ({ default: m.ReportsView }))
+);
+const SettingsView = React.lazy(() =>
+  import('./components/SettingsView').then((m) => ({ default: m.SettingsView }))
+);
+const NewTransactionModal = React.lazy(() =>
+  import('./components/NewTransactionModal').then((m) => ({ default: m.NewTransactionModal }))
+);
 
 // Inicializar listener de instalação PWA
 initPWAInstallListener();
@@ -525,58 +536,64 @@ export function App() {
         <PWAInstallBanner />
 
         <ErrorBoundary>
-          {currentView === 'dashboard' && (
-            <DashboardView
-              user={activeUser}
-              transactions={transactions}
-              onNavigate={setCurrentView}
-              onOpenNewTransaction={() => {
-                setEditingTransaction(null);
-                setIsNewTxModalOpen(true);
-              }}
-              onDeleteTransaction={handleDeleteTransaction}
-              onEditTransaction={handleOpenEditModal}
-              onAddTransaction={handleAddTransaction}
-            />
-          )}
+          <Suspense fallback={<ViewSkeleton />}>
+            {currentView === 'dashboard' && (
+              <DashboardView
+                user={activeUser}
+                transactions={transactions}
+                onNavigate={setCurrentView}
+                onOpenNewTransaction={() => {
+                  setEditingTransaction(null);
+                  setIsNewTxModalOpen(true);
+                }}
+                onDeleteTransaction={handleDeleteTransaction}
+                onEditTransaction={handleOpenEditModal}
+                onAddTransaction={handleAddTransaction}
+              />
+            )}
 
-          {currentView === 'transactions' && (
-            <TransactionsView
-              transactions={transactions}
-              onOpenNewTransaction={() => {
-                setEditingTransaction(null);
-                setIsNewTxModalOpen(true);
-              }}
-              onDeleteTransaction={handleDeleteTransaction}
-              onEditTransaction={handleOpenEditModal}
-              initialSearchQuery={globalSearchQuery}
-            />
-          )}
+            {currentView === 'transactions' && (
+              <TransactionsView
+                transactions={transactions}
+                onOpenNewTransaction={() => {
+                  setEditingTransaction(null);
+                  setIsNewTxModalOpen(true);
+                }}
+                onDeleteTransaction={handleDeleteTransaction}
+                onEditTransaction={handleOpenEditModal}
+                initialSearchQuery={globalSearchQuery}
+              />
+            )}
 
-          {currentView === 'reports' && (
-            <ReportsView transactions={transactions} user={activeUser} />
-          )}
+            {currentView === 'reports' && (
+              <ReportsView transactions={transactions} user={activeUser} />
+            )}
 
-          {currentView === 'settings' && (
-            <SettingsView
-              user={activeUser}
-              onUpdateUser={setUser}
-              onResetData={handleResetData}
-              pendingSyncCount={pendingSyncCount}
-            />
-          )}
+            {currentView === 'settings' && (
+              <SettingsView
+                user={activeUser}
+                onUpdateUser={setUser}
+                onResetData={handleResetData}
+                pendingSyncCount={pendingSyncCount}
+              />
+            )}
+          </Suspense>
         </ErrorBoundary>
       </main>
 
-      {/* New / Edit Transaction Modal */}
-      <NewTransactionModal
-        isOpen={isNewTxModalOpen}
-        onClose={handleCloseModal}
-        onAddTransaction={handleAddTransaction}
-        onUpdateTransaction={handleUpdateTransaction}
-        initialTx={editingTransaction}
-        user={activeUser}
-      />
+      {/* New / Edit Transaction Modal com Boundary Isolado */}
+      <Suspense fallback={null}>
+        {isNewTxModalOpen && (
+          <NewTransactionModal
+            isOpen={isNewTxModalOpen}
+            onClose={handleCloseModal}
+            onAddTransaction={handleAddTransaction}
+            onUpdateTransaction={handleUpdateTransaction}
+            initialTx={editingTransaction}
+            user={activeUser}
+          />
+        )}
+      </Suspense>
 
       {/* OCC Concurrency Conflict Resolution Modal */}
       <ConflictResolutionModal

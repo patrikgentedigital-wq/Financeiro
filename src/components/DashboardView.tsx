@@ -1,5 +1,4 @@
-import React, { useState, useMemo } from 'react';
-import { ResponsiveContainer, PieChart, Pie, Cell, Tooltip } from 'recharts';
+import React, { useState, useMemo, Suspense } from 'react';
 import { Transaction, UserProfile, ViewMode, SavingsGoal } from '../types';
 import { DailyTipCard } from './DailyTipCard';
 import { formatCurrencyBRL, formatDateBR } from '../data/categories';
@@ -10,6 +9,11 @@ import {
   calculateCategoryBudgetProgress,
   calculateCoupleBalance,
 } from '../utils/calculations';
+
+// Dynamic Lazy Import for Recharts PieChart component
+const DashboardPieChart = React.lazy(() =>
+  import('./DashboardPieChart').then((m) => ({ default: m.DashboardPieChart }))
+);
 
 interface DashboardViewProps {
   user: UserProfile;
@@ -493,8 +497,8 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
 
       {/* Analytics Grid: Category Breakdown PieChart & Recent Transactions */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-        {/* PieChart */}
-        <div className="glass-card rounded-3xl p-6 border border-purple-500/20 bg-[#120f24]/80 flex flex-col justify-between">
+        {/* PieChart carregado lazily */}
+        <div className="glass-card rounded-3xl p-6 border border-purple-500/20 bg-[#120f24]/80 flex flex-col justify-between min-h-[300px]">
           <div className="flex items-center justify-between border-b border-purple-500/15 pb-3 mb-4">
             <h3 className="text-base font-bold text-white flex items-center gap-2">
               <span className="material-symbols-outlined text-purple-400">pie_chart</span>
@@ -504,48 +508,17 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
           </div>
 
           {categoryChartData.length > 0 ? (
-            <div className="space-y-4">
-              <div className="h-48 w-full">
-                <ResponsiveContainer width="100%" height="100%">
-                  <PieChart>
-                    <Pie
-                      data={categoryChartData}
-                      cx="50%"
-                      cy="50%"
-                      innerRadius={50}
-                      outerRadius={75}
-                      paddingAngle={4}
-                      dataKey="value"
-                    >
-                      {categoryChartData.map((entry, index) => (
-                        <Cell key={`cell-${index}`} fill={entry.color} stroke="#120f24" strokeWidth={2} />
-                      ))}
-                    </Pie>
-                    <Tooltip
-                      formatter={(val?: any) => formatCurrencyBRL(Number(val || 0))}
-                      contentStyle={{
-                        backgroundColor: '#1c1833',
-                        borderColor: '#8b5cf6',
-                        borderRadius: '16px',
-                        color: '#fff',
-                        fontSize: '12px',
-                      }}
-                    />
-                  </PieChart>
-                </ResponsiveContainer>
-              </div>
-
-              {/* Legend List */}
-              <div className="grid grid-cols-2 gap-2 max-h-36 overflow-y-auto pr-1">
-                {categoryChartData.map((item) => (
-                  <div key={item.name} className="flex items-center gap-2 text-xs">
-                    <span className="w-2.5 h-2.5 rounded-full flex-shrink-0" style={{ backgroundColor: item.color }} />
-                    <span className="text-gray-300 truncate">{item.emoji} {item.name}</span>
-                    <span className="text-white font-bold ml-auto">{item.percentage}%</span>
-                  </div>
-                ))}
-              </div>
-            </div>
+            <Suspense
+              fallback={
+                <div className="h-48 flex items-center justify-center">
+                  <span className="material-symbols-outlined text-purple-400 text-3xl animate-spin">
+                    progress_activity
+                  </span>
+                </div>
+              }
+            >
+              <DashboardPieChart categoryChartData={categoryChartData} />
+            </Suspense>
           ) : (
             <div className="h-48 flex flex-col items-center justify-center text-center text-purple-300/50 text-xs">
               <span className="material-symbols-outlined text-3xl mb-1">donut_large</span>
