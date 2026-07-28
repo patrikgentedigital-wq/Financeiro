@@ -1,4 +1,4 @@
-import { precacheAndRoute, cleanupOutdatedCaches } from 'workbox-precaching';
+import { precacheAndRoute, cleanupOutdatedCaches, createHandlerBoundToURL } from 'workbox-precaching';
 import { registerRoute, NavigationRoute } from 'workbox-routing';
 import { NetworkFirst, CacheFirst, NetworkOnly } from 'workbox-strategies';
 import { ExpirationPlugin } from 'workbox-expiration';
@@ -9,7 +9,16 @@ declare let self: ServiceWorkerGlobalScope;
 cleanupOutdatedCaches();
 precacheAndRoute(self.__WB_MANIFEST);
 
-// 1. Supabase Auth: NetworkOnly (sempre direto na rede por segurança)
+// SPA Navigation Fallback (redireciona navegacao para index.html precachado)
+try {
+  const handler = createHandlerBoundToURL('/index.html');
+  const navigationRoute = new NavigationRoute(handler);
+  registerRoute(navigationRoute);
+} catch (e) {
+  console.warn('Navigation route fallback notice:', e);
+}
+
+// 1. Supabase Auth: NetworkOnly (sempre direto na rede por seguranca)
 registerRoute(
   ({ url }) => url.origin.includes('supabase.co') && url.pathname.includes('/auth/'),
   new NetworkOnly()
