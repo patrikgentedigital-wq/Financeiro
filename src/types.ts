@@ -34,6 +34,13 @@ export interface CategoryBudget {
   limit: number;
 }
 
+export interface CustomCategory {
+  id: string;
+  name: string;
+  icon: string;
+  type: TransactionType;
+}
+
 export interface SavingsGoal {
   id: string;
   title: string;
@@ -66,10 +73,12 @@ export interface UserProfile {
   totalBalance: number;
   monthlyIncomeGoal: number;
   totalBudgetGoal: number; // Mantido para retrocompatibilidade
-  categoryBudgets?: CategoryBudget[]; // Novo Orçamento por Categoria
+  categoryBudgets?: CategoryBudget[];
+  customCategories?: CustomCategory[];
   partner1Name?: string;
   partner2Name?: string;
-  savingsGoal?: SavingsGoal;
+  savingsGoal?: SavingsGoal; // Retrocompatibilidade (meta única legada)
+  savingsGoals?: SavingsGoal[]; // Múltiplas Metas de Poupança
   coupleId?: string;
   inviteCode?: string;
 }
@@ -83,4 +92,18 @@ export interface ToastNotification {
 export interface OCCConflict {
   localTx: Transaction;
   serverTx: Transaction;
+}
+
+export interface CoupleBalanceResult {
+  p1Name: string;
+  p2Name: string;
+  p1Paid: number;
+  p2Paid: number;
+  sharedTotal: number;
+  netBalance: number; // >0: p2 deve a p1, <0: p1 deve a p2
+  debtorName: string;
+  creditorName: string;
+  amountOwed: number;
+  isSettled: boolean;
+  hasNamesConfigured: boolean;
 }

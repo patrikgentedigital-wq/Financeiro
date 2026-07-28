@@ -4,6 +4,7 @@ import {
   getCategoryBreakdown,
   calculateSavingsGoalProgress,
   calculateCategoryBudgetProgress,
+  calculateCoupleBalance,
 } from './calculations';
 import { Transaction, CategoryBudget } from '../types';
 
@@ -55,6 +56,29 @@ describe('Financial Calculations Utility', () => {
     expect(totals.savingsRate).toBe(80);
   });
 
+  it('deve ignorar transações da categoria Ajustes nos totais financeiros de gastos do casal', () => {
+    const txWithAdjustment: Transaction[] = [
+      ...sampleTransactions,
+      {
+        id: '4',
+        date: `${todayMonthKey}-15`,
+        description: 'Acerto de Contas do Casal',
+        amount: 300,
+        type: 'despesa',
+        category: 'Ajustes',
+        isShared: false,
+        paidBy: 'Sam',
+        version: 1,
+      },
+    ];
+
+    const totals = calculateFinancialTotals(txWithAdjustment);
+
+    // O valor de 300 de Ajustes NÃO deve inflar o total de despesas (continua 1000)
+    expect(totals.expenses).toBe(1000);
+    expect(totals.balance).toBe(4000);
+  });
+
   it('deve agrupar gastos por categoria ordenando do maior para o menor', () => {
     const breakdown = getCategoryBreakdown(sampleTransactions, 'despesa');
 
@@ -87,5 +111,97 @@ describe('Financial Calculations Utility', () => {
 
     expect(alim?.status).toBe('warning');
     expect(alim?.percentage).toBe(80);
+  });
+
+  describe('calculateCoupleBalance (Acerto de Contas 50/50)', () => {
+    it('deve indicar nomes não configurados quando partner1Name ou partner2Name estiverem ausentes', () => {
+      const result = calculateCoupleBalance(sampleTransactions, '', 'Sam');
+      expect(result.hasNamesConfigured).toBe(false);
+      expect(result.isSettled).toBe(true);
+    });
+
+    it('deve retornar saldo quitado (isSettled: true) quando paidBy for Casal', () => {
+      const result = calculateCoupleBalance(sampleTransactions, 'Alex', 'Sam');
+      expect(result.hasNamesConfigured).toBe(true);
+      expect(result.sharedTotal).toBe(1000);
+      expect(result.p1Paid).toBe(0);
+      expect(result.p2Paid).toBe(0);
+      expect(result.isSettled).toBe(true);
+      expect(result.amountOwed).toBe(0);
+    });
+
+    it('deve calcular corretamente a dívida 50/50 quando um parceiro adiantou mais', () => {
+      const coupleTxs: Transaction[] = [
+        {
+          id: '1',
+          date: '2026-07-01',
+          description: 'Aluguel',
+          amount: 2000,
+          type: 'despesa',
+          category: 'Moradia',
+          isShared: true,
+          paidBy: 'Alex',
+        },
+        {
+          id: '2',
+          date: '2026-07-02',
+          description: 'Mercado',
+          amount: 600,
+          type: 'despesa',
+          category: 'Alimentação',
+          isShared: true,
+          paidBy: 'Sam',
+        },
+      ];
+
+      // Alex pagou 2000, Sam pagou 600.
+      // Total compartilhado = 2600.
+      // 50% de Alex = 1000, 50% de Sam = 300.
+      // NetBalance = 1000 - 300 = 700. Sam deve 700 a Alex.
+      const result = calculateCoupleBalance(coupleTxs, 'Alex', 'Sam');
+
+      expect(result.hasNamesConfigured).toBe(true);
+      expect(result.p1Paid).toBe(2000);
+      expect(result.p2Paid).toBe(600);
+      expect(result.sharedTotal).toBe(2600);
+      expect(result.netBalance).toBe(700);
+      expect(result.debtorName).toBe('Sam');
+      expect(result.creditorName).toBe('Alex');
+      expect(result.amountOwed).toBe(700);
+      expect(result.isSettled).toBe(false);
+    });
+
+    it('deve ignorar nomes órfãos/desconhecidos no paidBy e ser insensível a maiúsculas/minúsculas', () => {
+      const coupleTxs: Transaction[] = [
+        {
+          id: '1',
+          date: '2026-07-01',
+          description: 'Jantar',
+          amount: 200,
+          type: 'despesa',
+          category: 'Lazer',
+          isShared: true,
+          paidBy: ' alex ', // com espaços e minúsculo
+        },
+        {
+          id: '2',
+          date: '2026-07-02',
+          description: 'Presente Amiga Maria',
+          amount: 150,
+          type: 'despesa',
+          category: 'Outros',
+          isShared: true,
+          paidBy: 'Maria', // Nome órfão/desconhecido, deve ser ignorado
+        },
+      ];
+
+      const result = calculateCoupleBalance(coupleTxs, 'Alex', 'Sam');
+
+      expect(result.p1Paid).toBe(200);
+      expect(result.p2Paid).toBe(0);
+      expect(result.debtorName).toBe('Sam');
+      expect(result.creditorName).toBe('Alex');
+      expect(result.amountOwed).toBe(100);
+    });
   });
 });

@@ -1,6 +1,6 @@
 import React, { useState, useMemo } from 'react';
 import { ResponsiveContainer, PieChart, Pie, Cell, Tooltip } from 'recharts';
-import { Transaction, UserProfile, ViewMode } from '../types';
+import { Transaction, UserProfile, ViewMode, SavingsGoal } from '../types';
 import { DailyTipCard } from './DailyTipCard';
 import { formatCurrencyBRL, formatDateBR } from '../data/categories';
 import { generateMonthlyPDFReport } from '../utils/pdfExport';
@@ -8,6 +8,7 @@ import {
   calculateFinancialTotals,
   getCategoryBreakdown,
   calculateCategoryBudgetProgress,
+  calculateCoupleBalance,
 } from '../utils/calculations';
 
 interface DashboardViewProps {
@@ -17,6 +18,7 @@ interface DashboardViewProps {
   onOpenNewTransaction: () => void;
   onDeleteTransaction: (id: string) => void;
   onEditTransaction?: (tx: Transaction) => void;
+  onAddTransaction?: (tx: Omit<Transaction, 'id'>) => void;
 }
 
 export const DashboardView: React.FC<DashboardViewProps> = ({
@@ -26,6 +28,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
   onOpenNewTransaction,
   onDeleteTransaction,
   onEditTransaction,
+  onAddTransaction,
 }) => {
   // Toggle for Couple View vs Individual View
   const [viewScope, setViewScope] = useState<'couple' | 'individual'>('couple');
@@ -46,6 +49,30 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
   const currentMonthTotals = useMemo(() => {
     return calculateFinancialTotals(scopedTransactions);
   }, [scopedTransactions]);
+
+  // Acerto de contas do casal (divisão 50/50)
+  const coupleBalance = useMemo(() => {
+    return calculateCoupleBalance(scopedTransactions, user.partner1Name, user.partner2Name);
+  }, [scopedTransactions, user.partner1Name, user.partner2Name]);
+
+  // Múltiplas Metas de Poupança (com migração retrocompatível do formato antigo)
+  const savingsGoalsList = useMemo<SavingsGoal[]>(() => {
+    if (user.savingsGoals && user.savingsGoals.length > 0) {
+      return user.savingsGoals;
+    }
+    if (user.savingsGoal) {
+      return [user.savingsGoal];
+    }
+    return [
+      {
+        id: '1',
+        title: 'Viagem em Casal',
+        description: 'Férias do Casal',
+        currentAmount: 3200,
+        targetAmount: 5000,
+      },
+    ];
+  }, [user.savingsGoals, user.savingsGoal]);
 
   // Spending by category data for PieChart
   const categoryChartData = useMemo(() => {
@@ -72,11 +99,20 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
     setDeletingTxId(null);
   };
 
-  // Savings Goal calculation
-  const savingsGoal = user.savingsGoal;
-  const savingsPercent = savingsGoal
-    ? Math.min(100, Math.round((savingsGoal.currentAmount / savingsGoal.targetAmount) * 100))
-    : 0;
+  // Quitar Saldo do Casal
+  const handleSettleBalance = () => {
+    if (!onAddTransaction || coupleBalance.isSettled || !coupleBalance.hasNamesConfigured) return;
+
+    onAddTransaction({
+      date: new Date().toISOString().split('T')[0],
+      description: `Acerto de Contas do Casal (Quitação ${coupleBalance.debtorName} ➔ ${coupleBalance.creditorName})`,
+      amount: coupleBalance.amountOwed,
+      type: 'despesa',
+      category: 'Ajustes',
+      isShared: false,
+      paidBy: coupleBalance.debtorName,
+    });
+  };
 
   return (
     <div className="space-y-6 md:space-y-8 animate-in fade-in">
@@ -98,105 +134,156 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
 
         {/* Header Action Controls */}
         <div className="flex items-center gap-2 sm:gap-3 flex-wrap">
-          {/* Scope Toggle Button */}
-          <div className="flex bg-[#120f24] p-1 rounded-2xl border border-purple-500/20 text-xs">
+          {/* Toggle View Scope */}
+          <div className="bg-[#120f24] p-1 rounded-2xl border border-purple-500/20 flex items-center gap-1">
             <button
               onClick={() => setViewScope('couple')}
-              className={`px-3 py-1.5 rounded-xl font-bold transition-all cursor-pointer flex items-center gap-1.5 ${
+              className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all cursor-pointer ${
                 viewScope === 'couple'
-                  ? 'bg-purple-600 text-white shadow-md'
+                  ? 'bg-purple-600 text-white shadow-md shadow-purple-900/40'
                   : 'text-gray-400 hover:text-white'
               }`}
             >
-              <span className="material-symbols-outlined text-sm">group</span>
-              <span>Casal</span>
+              👫 Casal
             </button>
             <button
               onClick={() => setViewScope('individual')}
-              className={`px-3 py-1.5 rounded-xl font-bold transition-all cursor-pointer flex items-center gap-1.5 ${
+              className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all cursor-pointer ${
                 viewScope === 'individual'
-                  ? 'bg-purple-600 text-white shadow-md'
+                  ? 'bg-purple-600 text-white shadow-md shadow-purple-900/40'
                   : 'text-gray-400 hover:text-white'
               }`}
             >
-              <span className="material-symbols-outlined text-sm">person</span>
-              <span>Individual</span>
+              👤 Meus Gastos
             </button>
           </div>
 
           <button
             onClick={handleExportPDF}
-            className="px-4 py-2 bg-gradient-to-r from-purple-600 to-indigo-600 text-white font-bold text-xs rounded-2xl shadow-lg shadow-purple-900/40 hover:opacity-95 active:scale-95 transition-all cursor-pointer flex items-center gap-1.5"
-            title="Exportar Resumo Financeiro em PDF"
+            className="px-3.5 py-2 bg-[#1c1833] hover:bg-[#252044] text-purple-200 border border-purple-500/20 rounded-xl text-xs font-bold transition-all cursor-pointer flex items-center gap-1.5"
+            title="Exportar Relatório Mensal em PDF"
           >
-            <span className="material-symbols-outlined text-base">picture_as_pdf</span>
+            <span className="material-symbols-outlined text-base text-purple-400">picture_as_pdf</span>
             <span className="hidden sm:inline">Exportar PDF</span>
           </button>
         </div>
       </div>
 
-      {/* Summary Cards Grid */}
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-4 md:gap-6">
-        {/* Receitas Card */}
-        <div className="glass-card rounded-3xl p-6 relative overflow-hidden flex flex-col justify-between border border-emerald-500/20 bg-emerald-950/10">
-          <div className="flex items-center justify-between mb-2">
-            <span className="text-xs font-bold text-emerald-400 uppercase tracking-wider flex items-center gap-1.5">
-              <span className="material-symbols-outlined text-base">arrow_upward</span>
-              Total de Receitas
-            </span>
-            <div className="w-9 h-9 rounded-2xl bg-emerald-500/20 text-emerald-400 flex items-center justify-center">
-              <span className="material-symbols-outlined text-xl">payments</span>
+      {/* CARD DE ACERTO DE CONTAS DO CASAL ("QUEM DEVE QUANTO") */}
+      <div className="glass-card rounded-3xl p-6 border border-purple-500/20 bg-gradient-to-br from-[#131024] to-[#1a1536] shadow-xl space-y-4">
+        <div className="flex items-center justify-between border-b border-purple-500/15 pb-3">
+          <div className="flex items-center gap-2.5">
+            <div className="w-10 h-10 rounded-2xl bg-purple-600/20 text-purple-300 flex items-center justify-center border border-purple-500/30">
+              <span className="material-symbols-outlined text-xl">handshake</span>
+            </div>
+            <div>
+              <h3 className="text-base font-bold text-white">Acerto de Contas do Casal (50/50)</h3>
+              <p className="text-xs text-purple-200/70">
+                Divisão automática de despesas compartilhadas adiantadas por cada um
+              </p>
+            </div>
+          </div>
+
+          {coupleBalance.hasNamesConfigured && !coupleBalance.isSettled && (
+            <button
+              onClick={handleSettleBalance}
+              className="px-4 py-2 bg-gradient-to-r from-emerald-600 to-teal-600 text-white font-extrabold text-xs rounded-xl shadow-lg shadow-emerald-950/40 hover:opacity-95 active:scale-95 transition-all cursor-pointer flex items-center gap-1.5"
+            >
+              <span className="material-symbols-outlined text-base">check_circle</span>
+              <span>Quitar Saldo (R$ {coupleBalance.amountOwed.toFixed(2)})</span>
+            </button>
+          )}
+        </div>
+
+        {!coupleBalance.hasNamesConfigured ? (
+          <div className="p-4 bg-[#1c1833] rounded-2xl border border-purple-500/10 flex items-center justify-between text-xs flex-wrap gap-3">
+            <div className="flex items-center gap-2 text-amber-300">
+              <span className="material-symbols-outlined text-lg">info</span>
+              <span>Configure os nomes dos dois parceiros em Ajustes para ativar a apuração automática.</span>
+            </div>
+            <button
+              onClick={() => onNavigate('settings')}
+              className="px-3.5 py-1.5 bg-purple-600 hover:bg-purple-500 text-white font-bold text-xs rounded-xl transition-all cursor-pointer"
+            >
+              Configurar Nomes
+            </button>
+          </div>
+        ) : coupleBalance.isSettled ? (
+          <div className="p-4 bg-emerald-950/40 rounded-2xl border border-emerald-500/30 flex items-center gap-2 text-xs font-bold text-emerald-300">
+            <span className="material-symbols-outlined text-lg text-emerald-400">check_circle</span>
+            <span>Contas do casal em dia! Nenhuma pendência financeira entre {coupleBalance.p1Name} e {coupleBalance.p2Name}.</span>
+          </div>
+        ) : (
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+            <div className="p-4 bg-[#1c1833] rounded-2xl border border-purple-500/10 space-y-1">
+              <p className="text-[11px] text-gray-400 font-semibold">{coupleBalance.p1Name} pagou adiantado:</p>
+              <p className="text-lg font-bold text-purple-300">{formatCurrencyBRL(coupleBalance.p1Paid)}</p>
+            </div>
+
+            <div className="p-4 bg-[#1c1833] rounded-2xl border border-purple-500/10 space-y-1">
+              <p className="text-[11px] text-gray-400 font-semibold">{coupleBalance.p2Name} pagou adiantado:</p>
+              <p className="text-lg font-bold text-purple-300">{formatCurrencyBRL(coupleBalance.p2Paid)}</p>
+            </div>
+
+            <div className="p-4 bg-amber-950/40 rounded-2xl border border-amber-500/30 space-y-1 flex flex-col justify-center">
+              <p className="text-[11px] text-amber-300 font-bold uppercase tracking-wider">Saldo Pendente:</p>
+              <p className="text-base font-extrabold text-amber-200">
+                <span className="text-white font-black">{coupleBalance.debtorName}</span> deve{' '}
+                <span className="text-emerald-300 font-black">{formatCurrencyBRL(coupleBalance.amountOwed)}</span> a{' '}
+                <span className="text-white font-black">{coupleBalance.creditorName}</span>.
+              </p>
+            </div>
+          </div>
+        )}
+      </div>
+
+      {/* Main KPI Grid Cards */}
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 md:gap-6">
+        {/* Total Renda */}
+        <div className="glass-card rounded-3xl p-6 border border-purple-500/20 bg-gradient-to-br from-[#16122c] to-[#120f24] hover:border-purple-500/40 transition-all shadow-lg">
+          <div className="flex items-center justify-between">
+            <span className="text-xs font-bold text-purple-200/70 tracking-wide uppercase">Receita Total</span>
+            <div className="w-10 h-10 rounded-2xl bg-emerald-500/20 text-emerald-400 flex items-center justify-center border border-emerald-500/30">
+              <span className="material-symbols-outlined text-xl">arrow_upward</span>
             </div>
           </div>
           <div className="mt-2">
             <p className="text-2xl md:text-3xl font-black text-emerald-400 tracking-tight break-words">
               {formatCurrencyBRL(currentMonthTotals.income)}
             </p>
-            <p className="text-[11px] text-emerald-300/70 mt-1">Entradas acumuladas</p>
+            <p className="text-[11px] text-purple-200/70 mt-1">
+              Meta Mensal: <span className="font-bold text-white">{formatCurrencyBRL(user.monthlyIncomeGoal || 8000)}</span>
+            </p>
           </div>
         </div>
 
-        {/* Despesas Card */}
-        <div className="glass-card rounded-3xl p-6 relative overflow-hidden flex flex-col justify-between border border-rose-500/20 bg-rose-950/10">
-          <div className="flex items-center justify-between mb-2">
-            <span className="text-xs font-bold text-rose-400 uppercase tracking-wider flex items-center gap-1.5">
-              <span className="material-symbols-outlined text-base">arrow_downward</span>
-              Total de Despesas
-            </span>
-            <div className="w-9 h-9 rounded-2xl bg-rose-500/20 text-rose-400 flex items-center justify-center">
-              <span className="material-symbols-outlined text-xl">shopping_bag</span>
+        {/* Total Despesas */}
+        <div className="glass-card rounded-3xl p-6 border border-purple-500/20 bg-gradient-to-br from-[#16122c] to-[#120f24] hover:border-purple-500/40 transition-all shadow-lg">
+          <div className="flex items-center justify-between">
+            <span className="text-xs font-bold text-purple-200/70 tracking-wide uppercase">Despesas Totais</span>
+            <div className="w-10 h-10 rounded-2xl bg-rose-500/20 text-rose-400 flex items-center justify-center border border-rose-500/30">
+              <span className="material-symbols-outlined text-xl">arrow_downward</span>
             </div>
           </div>
           <div className="mt-2">
             <p className="text-2xl md:text-3xl font-black text-rose-400 tracking-tight break-words">
               {formatCurrencyBRL(currentMonthTotals.expenses)}
             </p>
-            <p className="text-[11px] text-rose-300/70 mt-1">Saídas acumuladas</p>
+            <p className="text-[11px] text-purple-200/70 mt-1">
+              Teto de Orçamento: <span className="font-bold text-white">{formatCurrencyBRL(user.totalBudgetGoal || 5000)}</span>
+            </p>
           </div>
         </div>
 
-        {/* Saldo Atual Card */}
-        <div
-          className={`glass-card rounded-3xl p-6 relative overflow-hidden flex flex-col justify-between border ${
-            currentMonthTotals.balance >= 0
-              ? 'border-emerald-500/30 bg-emerald-950/20'
-              : 'border-rose-500/30 bg-rose-950/20'
-          }`}
-        >
-          <div className="flex items-center justify-between mb-2">
-            <span
-              className={`text-xs font-bold uppercase tracking-wider flex items-center gap-1.5 ${
-                currentMonthTotals.balance >= 0 ? 'text-emerald-400' : 'text-rose-400'
-              }`}
-            >
-              <span className="material-symbols-outlined text-base">account_balance_wallet</span>
-              Saldo Atual
-            </span>
+        {/* Saldo Geral */}
+        <div className="glass-card rounded-3xl p-6 border border-purple-500/20 bg-gradient-to-br from-[#16122c] to-[#120f24] hover:border-purple-500/40 transition-all shadow-lg sm:col-span-2 lg:col-span-1">
+          <div className="flex items-center justify-between">
+            <span className="text-xs font-bold text-purple-200/70 tracking-wide uppercase">Saldo Líquido</span>
             <div
-              className={`w-9 h-9 rounded-2xl flex items-center justify-center ${
+              className={`w-10 h-10 rounded-2xl flex items-center justify-center border ${
                 currentMonthTotals.balance >= 0
-                  ? 'bg-emerald-500/20 text-emerald-400'
-                  : 'bg-rose-500/20 text-rose-400'
+                  ? 'bg-emerald-500/20 text-emerald-400 border-emerald-500/30'
+                  : 'bg-rose-500/20 text-rose-400 border-rose-500/30'
               }`}
             >
               <span className="material-symbols-outlined text-xl">
@@ -216,6 +303,58 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
               Taxa de Economia: <span className="font-bold text-white">{currentMonthTotals.savingsRate}%</span>
             </p>
           </div>
+        </div>
+      </div>
+
+      {/* MÚLTIPLAS METAS DE POUPANÇA */}
+      <div className="glass-card rounded-3xl p-6 border border-purple-500/20 bg-[#120f24]/80 space-y-4">
+        <div className="flex items-center justify-between border-b border-purple-500/15 pb-3">
+          <div className="flex items-center gap-2">
+            <span className="material-symbols-outlined text-purple-400 text-2xl">savings</span>
+            <div>
+              <h3 className="text-base font-bold text-white">Metas de Poupança do Casal</h3>
+              <p className="text-xs text-gray-400">Progresso dos objetivos de economia e investimentos</p>
+            </div>
+          </div>
+          <button
+            onClick={() => onNavigate('settings')}
+            className="text-xs font-bold text-purple-300 hover:text-purple-100 flex items-center gap-1 transition-colors cursor-pointer"
+          >
+            <span>Gerenciar Metas</span>
+            <span className="material-symbols-outlined text-sm">settings</span>
+          </button>
+        </div>
+
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          {savingsGoalsList.map((goal) => {
+            const percent = Math.min(100, Math.round((goal.currentAmount / goal.targetAmount) * 100));
+            return (
+              <div key={goal.id} className="p-4 rounded-2xl bg-[#1c1833] border border-purple-500/10 space-y-2">
+                <div className="flex justify-between items-center text-xs">
+                  <div>
+                    <h4 className="font-bold text-white flex items-center gap-1.5">
+                      <span>🎯</span>
+                      <span>{goal.title}</span>
+                    </h4>
+                    <p className="text-[11px] text-gray-400">{goal.description}</p>
+                  </div>
+                  <span className="font-extrabold text-emerald-400 text-sm">{percent}%</span>
+                </div>
+
+                <div className="w-full h-3 bg-[#0f0c1b] rounded-full overflow-hidden p-0.5 border border-purple-500/20">
+                  <div
+                    className="h-full rounded-full bg-gradient-to-r from-purple-500 to-indigo-500 transition-all duration-500"
+                    style={{ width: `${percent}%` }}
+                  />
+                </div>
+
+                <p className="text-[11px] text-gray-300 font-medium">
+                  Guardado <span className="font-bold text-emerald-400">{formatCurrencyBRL(goal.currentAmount)}</span> de{' '}
+                  <span className="font-bold text-white">{formatCurrencyBRL(goal.targetAmount)}</span> pretendidos.
+                </p>
+              </div>
+            );
+          })}
         </div>
       </div>
 
@@ -352,34 +491,21 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
         )}
       </div>
 
-      {/* Dica do Dia AI Card */}
-      <DailyTipCard transactions={scopedTransactions} user={user} />
-
-      {/* Middle Section: PieChart & Recent Transactions */}
+      {/* Analytics Grid: Category Breakdown PieChart & Recent Transactions */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-        {/* PieChart Card (Despesas por Categoria) */}
-        <div className="glass-card rounded-3xl p-6 border border-purple-500/20 bg-[#120f24]/80 flex flex-col justify-between lg:col-span-1">
-          <div>
-            <div className="flex items-center justify-between border-b border-purple-500/15 pb-3 mb-4">
-              <h3 className="text-base font-bold text-white flex items-center gap-2">
-                <span className="material-symbols-outlined text-purple-400 text-xl">pie_chart</span>
-                Gastos por Categoria
-              </h3>
-              <button
-                onClick={() => onNavigate('reports')}
-                className="text-xs font-bold text-purple-300 hover:text-purple-100 flex items-center gap-1 transition-colors cursor-pointer"
-              >
-                <span>Relatório</span>
-                <span className="material-symbols-outlined text-sm">arrow_forward</span>
-              </button>
-            </div>
+        {/* PieChart */}
+        <div className="glass-card rounded-3xl p-6 border border-purple-500/20 bg-[#120f24]/80 flex flex-col justify-between">
+          <div className="flex items-center justify-between border-b border-purple-500/15 pb-3 mb-4">
+            <h3 className="text-base font-bold text-white flex items-center gap-2">
+              <span className="material-symbols-outlined text-purple-400">pie_chart</span>
+              Gastos por Categoria
+            </h3>
+            <span className="text-[11px] font-bold text-purple-300">Neste mês</span>
+          </div>
 
-            {categoryChartData.length === 0 ? (
-              <div className="py-12 text-center text-gray-400 text-xs">
-                Nenhuma despesa registrada para o gráfico.
-              </div>
-            ) : (
-              <div className="h-48 relative">
+          {categoryChartData.length > 0 ? (
+            <div className="space-y-4">
+              <div className="h-48 w-full">
                 <ResponsiveContainer width="100%" height="100%">
                   <PieChart>
                     <Pie
@@ -396,10 +522,10 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
                       ))}
                     </Pie>
                     <Tooltip
-                      formatter={(val: any) => [`R$ ${Number(val).toFixed(2)}`, 'Gasto']}
+                      formatter={(val?: any) => formatCurrencyBRL(Number(val || 0))}
                       contentStyle={{
-                        backgroundColor: '#19152d',
-                        borderColor: 'rgba(168,85,247,0.3)',
+                        backgroundColor: '#1c1833',
+                        borderColor: '#8b5cf6',
                         borderRadius: '16px',
                         color: '#fff',
                         fontSize: '12px',
@@ -408,140 +534,152 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
                   </PieChart>
                 </ResponsiveContainer>
               </div>
-            )}
-          </div>
 
-          {/* Categories Legend list */}
-          {categoryChartData.length > 0 && (
-            <div className="mt-4 pt-3 border-t border-purple-500/10 space-y-1.5 max-h-36 overflow-y-auto">
-              {categoryChartData.slice(0, 4).map((item) => (
-                <div key={item.name} className="flex items-center justify-between text-xs">
-                  <div className="flex items-center gap-2 truncate">
-                    <span className="w-2.5 h-2.5 rounded-full shrink-0" style={{ backgroundColor: item.color }} />
-                    <span className="text-gray-300 truncate">
-                      {item.emoji} {item.name}
-                    </span>
+              {/* Legend List */}
+              <div className="grid grid-cols-2 gap-2 max-h-36 overflow-y-auto pr-1">
+                {categoryChartData.map((item) => (
+                  <div key={item.name} className="flex items-center gap-2 text-xs">
+                    <span className="w-2.5 h-2.5 rounded-full flex-shrink-0" style={{ backgroundColor: item.color }} />
+                    <span className="text-gray-300 truncate">{item.emoji} {item.name}</span>
+                    <span className="text-white font-bold ml-auto">{item.percentage}%</span>
                   </div>
-                  <span className="font-bold text-white shrink-0 ml-2">{item.percentage}%</span>
-                </div>
-              ))}
+                ))}
+              </div>
+            </div>
+          ) : (
+            <div className="h-48 flex flex-col items-center justify-center text-center text-purple-300/50 text-xs">
+              <span className="material-symbols-outlined text-3xl mb-1">donut_large</span>
+              <span>Nenhuma despesa registrada este mês</span>
             </div>
           )}
         </div>
 
-        {/* Recent Transactions List Card */}
-        <div className="glass-card rounded-3xl p-6 border border-purple-500/20 bg-[#120f24]/80 lg:col-span-2 flex flex-col justify-between">
-          <div>
-            <div className="flex items-center justify-between border-b border-purple-500/15 pb-3 mb-4">
-              <div>
-                <h3 className="text-base font-bold text-white flex items-center gap-2">
-                  <span className="material-symbols-outlined text-purple-400 text-xl">history</span>
-                  Últimos Lançamentos
-                </h3>
-                <p className="text-xs text-gray-400">Movimentações recentes cadastradas</p>
-              </div>
-              <button
-                onClick={() => onNavigate('transactions')}
-                className="text-xs font-bold text-purple-300 hover:text-purple-100 flex items-center gap-1 transition-colors cursor-pointer"
-              >
-                <span>Ver Todas</span>
-                <span className="material-symbols-outlined text-sm">arrow_forward</span>
-              </button>
-            </div>
-
-            {scopedTransactions.length === 0 ? (
-              <div className="py-12 text-center text-gray-400 text-xs">
-                Nenhuma transação cadastrada até o momento.
-              </div>
-            ) : (
-              <div className="space-y-3">
-                {scopedTransactions.slice(0, 5).map((tx) => (
-                  <div
-                    key={tx.id}
-                    className="p-3.5 rounded-2xl bg-[#1c1833] border border-purple-500/10 flex items-center justify-between hover:border-purple-500/30 transition-all"
-                  >
-                    <div className="flex items-center gap-3 min-w-0">
-                      <div className="w-10 h-10 rounded-xl bg-purple-900/30 border border-purple-500/20 flex items-center justify-center text-lg shrink-0">
-                        {tx.type === 'receita' ? '💰' : '🛒'}
-                      </div>
-                      <div className="min-w-0">
-                        <p className="font-bold text-white text-xs truncate">{tx.description}</p>
-                        <p className="text-[10px] text-gray-400 flex items-center gap-1.5 mt-0.5">
-                          <span>{formatDateBR(tx.date)}</span>
-                          <span>•</span>
-                          <span className="text-purple-300 font-semibold">{tx.category}</span>
-                        </p>
-                      </div>
-                    </div>
-
-                    <div className="text-right shrink-0 ml-3">
-                      <p
-                        className={`font-black text-xs ${
-                          tx.type === 'receita' ? 'text-emerald-400' : 'text-rose-400'
-                        }`}
-                      >
-                        {tx.type === 'receita' ? '+' : '-'} {formatCurrencyBRL(tx.amount)}
-                      </p>
-                      <div className="flex items-center justify-end gap-1.5 mt-1">
-                        {onEditTransaction && (
-                          <button
-                            onClick={() => onEditTransaction(tx)}
-                            className="text-purple-300 hover:text-white p-0.5 rounded cursor-pointer"
-                            title="Editar"
-                          >
-                            <span className="material-symbols-outlined text-sm">edit</span>
-                          </button>
-                        )}
-                        <button
-                          onClick={() => setDeletingTxId(tx.id)}
-                          className="text-rose-400 hover:text-rose-200 p-0.5 rounded cursor-pointer"
-                          title="Excluir"
-                        >
-                          <span className="material-symbols-outlined text-sm">delete</span>
-                        </button>
-                      </div>
-                    </div>
-                  </div>
-                ))}
-              </div>
-            )}
+        {/* Recent Transactions List (2 columns) */}
+        <div className="glass-card rounded-3xl p-6 border border-purple-500/20 bg-[#120f24]/80 lg:col-span-2 space-y-4">
+          <div className="flex items-center justify-between border-b border-purple-500/15 pb-3">
+            <h3 className="text-base font-bold text-white flex items-center gap-2">
+              <span className="material-symbols-outlined text-purple-400">history</span>
+              Últimas Transações
+            </h3>
+            <button
+              onClick={() => onNavigate('transactions')}
+              className="text-xs font-bold text-purple-300 hover:text-purple-100 flex items-center gap-1 transition-colors cursor-pointer"
+            >
+              <span>Ver Todas ({scopedTransactions.length})</span>
+              <span className="material-symbols-outlined text-sm">arrow_forward</span>
+            </button>
           </div>
 
-          <div className="pt-4 mt-4 border-t border-purple-500/10 flex justify-end">
-            <button
-              onClick={onOpenNewTransaction}
-              className="w-full sm:w-auto px-5 py-2.5 rounded-2xl bg-purple-600 hover:bg-purple-500 text-white font-bold text-xs shadow-lg shadow-purple-900/30 transition-all cursor-pointer flex items-center justify-center gap-2"
-            >
-              <span className="material-symbols-outlined text-base">add_circle</span>
-              <span>Adicionar Transação</span>
-            </button>
+          <div className="space-y-2.5">
+            {scopedTransactions.slice(0, 5).map((tx) => (
+              <div
+                key={tx.id}
+                className="p-3.5 bg-[#1c1833] hover:bg-[#231e42] rounded-2xl border border-purple-500/10 flex items-center justify-between gap-3 transition-colors group"
+              >
+                <div className="flex items-center gap-3 min-w-0">
+                  <div
+                    className={`w-10 h-10 rounded-2xl flex items-center justify-center text-lg flex-shrink-0 ${
+                      tx.type === 'receita'
+                        ? 'bg-emerald-500/15 text-emerald-400 border border-emerald-500/20'
+                        : 'bg-rose-500/15 text-rose-400 border border-rose-500/20'
+                    }`}
+                  >
+                    <span>{tx.type === 'receita' ? '💰' : '💸'}</span>
+                  </div>
+
+                  <div className="min-w-0">
+                    <div className="flex items-center gap-1.5 flex-wrap">
+                      <p className="text-xs font-bold text-white truncate">{tx.description}</p>
+                      {tx.isRecurring && (
+                        <span className="text-[10px]" title="Transação Recorrente">
+                          🔁
+                        </span>
+                      )}
+                      {tx.isShared && (
+                        <span className="px-1.5 py-0.2 rounded-md text-[9px] font-bold bg-purple-500/20 text-purple-300 border border-purple-500/30">
+                          Casal
+                        </span>
+                      )}
+                    </div>
+                    <p className="text-[10px] text-gray-400">
+                      {formatDateBR(tx.date)} • {tx.category} {tx.paidBy ? `• ${tx.paidBy}` : ''}
+                    </p>
+                  </div>
+                </div>
+
+                <div className="flex items-center gap-3 flex-shrink-0">
+                  <p
+                    className={`text-xs md:text-sm font-black ${
+                      tx.type === 'receita' ? 'text-emerald-400' : 'text-rose-400'
+                    }`}
+                  >
+                    {tx.type === 'receita' ? '+' : '-'} {formatCurrencyBRL(tx.amount)}
+                  </p>
+
+                  <div className="flex items-center gap-1 opacity-80 md:opacity-0 group-hover:opacity-100 transition-opacity">
+                    {onEditTransaction && (
+                      <button
+                        onClick={() => onEditTransaction(tx)}
+                        className="p-1.5 hover:bg-purple-500/20 text-purple-300 rounded-lg transition-colors cursor-pointer"
+                        title="Editar transação"
+                      >
+                        <span className="material-symbols-outlined text-sm">edit</span>
+                      </button>
+                    )}
+                    <button
+                      onClick={() => setDeletingTxId(tx.id)}
+                      className="p-1.5 hover:bg-rose-500/20 text-rose-400 rounded-lg transition-colors cursor-pointer"
+                      title="Excluir transação"
+                    >
+                      <span className="material-symbols-outlined text-sm">delete</span>
+                    </button>
+                  </div>
+                </div>
+              </div>
+            ))}
+
+            {scopedTransactions.length === 0 && (
+              <div className="p-8 text-center bg-[#1c1833] rounded-2xl border border-purple-500/10 text-xs text-purple-300/60 space-y-2">
+                <span className="material-symbols-outlined text-4xl text-purple-400">receipt_long</span>
+                <p>Nenhuma transação encontrada.</p>
+                <button
+                  onClick={onOpenNewTransaction}
+                  className="px-4 py-2 bg-purple-600 text-white font-bold rounded-xl shadow-md cursor-pointer"
+                >
+                  Adicionar Primeira Transação
+                </button>
+              </div>
+            )}
           </div>
         </div>
       </div>
 
+      {/* Daily Tip Footer Card */}
+      <DailyTipCard />
+
       {/* Delete Confirmation Modal */}
       {deletingTxId && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/70 backdrop-blur-sm animate-in fade-in">
-          <div className="glass-card p-6 rounded-3xl border border-rose-500/30 bg-[#131024]/95 shadow-2xl max-w-sm w-full space-y-4 text-center">
-            <div className="w-12 h-12 rounded-2xl bg-rose-500/20 text-rose-400 mx-auto flex items-center justify-center border border-rose-500/30">
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/70 backdrop-blur-md animate-in fade-in">
+          <div className="bg-[#18142e] border border-purple-500/30 rounded-3xl p-6 max-w-sm w-full space-y-4 text-center shadow-2xl">
+            <div className="w-12 h-12 rounded-2xl bg-rose-500/20 text-rose-400 flex items-center justify-center mx-auto border border-rose-500/30">
               <span className="material-symbols-outlined text-2xl">warning</span>
             </div>
-            <h3 className="text-base font-bold text-white">Excluir Lançamento?</h3>
-            <p className="text-xs text-purple-200/70">
-              Esta ação removerá permanentemente a transação.
+            <h3 className="text-base font-bold text-white">Excluir Transação?</h3>
+            <p className="text-xs text-gray-300">
+              Esta ação removerá a transação selecionada do controle financeiro.
             </p>
-            <div className="flex items-center justify-center gap-3 pt-2">
+            <div className="flex gap-3 pt-2">
               <button
                 onClick={() => setDeletingTxId(null)}
-                className="px-4 py-2 rounded-xl border border-purple-500/20 text-xs font-semibold text-purple-200 hover:bg-purple-500/10 cursor-pointer"
+                className="flex-1 py-2.5 rounded-xl bg-white/10 hover:bg-white/15 text-white font-bold text-xs transition-colors cursor-pointer"
               >
                 Cancelar
               </button>
               <button
                 onClick={() => confirmDelete(deletingTxId)}
-                className="px-5 py-2 rounded-xl bg-rose-600 hover:bg-rose-700 text-white text-xs font-bold shadow-lg shadow-rose-900/40 cursor-pointer"
+                className="flex-1 py-2.5 rounded-xl bg-rose-600 hover:bg-rose-500 text-white font-bold text-xs shadow-lg shadow-rose-900/40 transition-colors cursor-pointer"
               >
-                Confirmar Exclusão
+                Excluir
               </button>
             </div>
           </div>

@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { UserProfile, CategoryBudget } from '../types';
+import { UserProfile, CategoryBudget, CustomCategory, SavingsGoal } from '../types';
 import {
   SUPABASE_URL,
   SUPABASE_ANON_KEY,
@@ -33,13 +33,20 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
 }) => {
   const [formData, setFormData] = useState<UserProfile>({
     ...user,
-    savingsGoal: user.savingsGoal || {
-      id: '1',
-      title: 'Viagem em Casal',
-      description: 'Férias do Casal',
-      currentAmount: 3200,
-      targetAmount: 5000,
-    },
+    savingsGoals: user.savingsGoals?.length
+      ? user.savingsGoals
+      : user.savingsGoal
+      ? [user.savingsGoal]
+      : [
+          {
+            id: '1',
+            title: 'Viagem em Casal',
+            description: 'Férias do Casal',
+            currentAmount: 3200,
+            targetAmount: 5000,
+          },
+        ],
+    customCategories: user.customCategories || [],
   });
 
   const [categoryBudgets, setCategoryBudgets] = useState<Record<string, string>>(() => {
@@ -51,6 +58,17 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
     return map;
   });
 
+  // Novos campos para criar categoria customizada
+  const [newCatName, setNewCatName] = useState('');
+  const [newCatIcon, setNewCatIcon] = useState('🏷️');
+  const [newCatType, setNewCatType] = useState<'despesa' | 'receita'>('despesa');
+
+  // Novos campos para criar nova meta de poupança
+  const [newGoalTitle, setNewGoalTitle] = useState('');
+  const [newGoalDesc, setNewGoalDesc] = useState('');
+  const [newGoalTarget, setNewGoalTarget] = useState('');
+  const [newGoalCurrent, setNewGoalCurrent] = useState('');
+
   const [isSaving, setIsSaving] = useState(false);
   const [savedSuccess, setSavedSuccess] = useState(false);
   const [canInstall, setCanInstall] = useState(isPWAInstallable());
@@ -59,13 +77,20 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
   useEffect(() => {
     setFormData({
       ...user,
-      savingsGoal: user.savingsGoal || {
-        id: '1',
-        title: 'Viagem em Casal',
-        description: 'Férias do Casal',
-        currentAmount: 3200,
-        targetAmount: 5000,
-      },
+      savingsGoals: user.savingsGoals?.length
+        ? user.savingsGoals
+        : user.savingsGoal
+        ? [user.savingsGoal]
+        : [
+            {
+              id: '1',
+              title: 'Viagem em Casal',
+              description: 'Férias do Casal',
+              currentAmount: 3200,
+              targetAmount: 5000,
+            },
+          ],
+      customCategories: user.customCategories || [],
     });
 
     const map: Record<string, string> = {};
@@ -109,6 +134,68 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
     reader.readAsDataURL(file);
   };
 
+  // Adicionar Categoria Customizada
+  const handleAddCustomCategory = () => {
+    if (!newCatName.trim()) return;
+
+    const newCat: CustomCategory = {
+      id: `custom-cat-${Date.now()}`,
+      name: newCatName.trim(),
+      icon: newCatIcon.trim() || '🏷️',
+      type: newCatType,
+    };
+
+    setFormData((prev) => ({
+      ...prev,
+      customCategories: [...(prev.customCategories || []), newCat],
+    }));
+
+    setNewCatName('');
+    setNewCatIcon('🏷️');
+  };
+
+  // Remover Categoria Customizada
+  const handleRemoveCustomCategory = (id: string) => {
+    setFormData((prev) => ({
+      ...prev,
+      customCategories: (prev.customCategories || []).filter((c) => c.id !== id),
+    }));
+  };
+
+  // Adicionar Nova Meta de Poupança
+  const handleAddSavingsGoal = () => {
+    if (!newGoalTitle.trim() || !newGoalTarget) return;
+
+    const targetVal = Math.max(0, parseFloat(newGoalTarget) || 0);
+    const currentVal = Math.max(0, parseFloat(newGoalCurrent) || 0);
+
+    const newGoal: SavingsGoal = {
+      id: `goal-${Date.now()}`,
+      title: newGoalTitle.trim(),
+      description: newGoalDesc.trim() || 'Objetivo financeiro',
+      targetAmount: targetVal,
+      currentAmount: currentVal,
+    };
+
+    setFormData((prev) => ({
+      ...prev,
+      savingsGoals: [...(prev.savingsGoals || []), newGoal],
+    }));
+
+    setNewGoalTitle('');
+    setNewGoalDesc('');
+    setNewGoalTarget('');
+    setNewGoalCurrent('');
+  };
+
+  // Remover Meta de Poupança
+  const handleRemoveSavingsGoal = (id: string) => {
+    setFormData((prev) => ({
+      ...prev,
+      savingsGoals: (prev.savingsGoals || []).filter((g) => g.id !== id),
+    }));
+  };
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setIsSaving(true);
@@ -149,14 +236,14 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
           Configurações da Conta
         </h1>
         <p className="text-xs text-purple-200/70 font-medium mt-1">
-          Ajustes do perfil do casal, foto de perfil, status PWA/offline e integração Supabase
+          Ajustes do perfil do casal, categorias customizadas, metas de poupança e status PWA/offline
         </p>
       </div>
 
       {savedSuccess && (
         <div className="p-4 rounded-2xl bg-emerald-950/80 border border-emerald-500/40 text-emerald-200 text-xs font-bold flex items-center gap-2 shadow-lg shadow-emerald-950/50 animate-in slide-in-from-top-2">
           <span className="material-symbols-outlined text-lg text-emerald-400">check_circle</span>
-          <span>Configurações e foto de perfil salvas com sucesso no Supabase e no dispositivo!</span>
+          <span>Configurações, metas e categorias salvas com sucesso no Supabase e no dispositivo!</span>
         </div>
       )}
 
@@ -382,6 +469,202 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
               />
             </div>
           </div>
+        </div>
+
+        {/* CATEGORIAS CUSTOMIZADAS */}
+        <div className="glass-card p-6 md:p-8 rounded-3xl border border-purple-500/20 space-y-6">
+          <div className="border-b border-purple-500/20 pb-3 flex items-center justify-between">
+            <div className="flex items-center gap-2">
+              <span className="material-symbols-outlined text-purple-400">category</span>
+              <div>
+                <h3 className="text-base font-bold text-white">Categorias Personalizadas</h3>
+                <p className="text-xs text-purple-200/60">Crie novas categorias customizadas com ícones para os lançamentos</p>
+              </div>
+            </div>
+          </div>
+
+          {/* Form para adicionar nova categoria */}
+          <div className="p-4 bg-[#120f24] rounded-2xl border border-purple-500/20 space-y-3">
+            <h4 className="text-xs font-bold text-white">Nova Categoria Personalizada</h4>
+            <div className="grid grid-cols-1 sm:grid-cols-4 gap-3">
+              <div>
+                <label className="block text-[11px] font-semibold text-purple-200/70 mb-1">Ícone / Emoji</label>
+                <input
+                  type="text"
+                  value={newCatIcon}
+                  onChange={(e) => setNewCatIcon(e.target.value)}
+                  placeholder="Ex: 🐱"
+                  className="w-full px-3 py-2 bg-[#1c1833] border border-purple-500/20 rounded-xl text-xs text-white outline-none"
+                />
+              </div>
+
+              <div className="sm:col-span-2">
+                <label className="block text-[11px] font-semibold text-purple-200/70 mb-1">Nome da Categoria</label>
+                <input
+                  type="text"
+                  value={newCatName}
+                  onChange={(e) => setNewCatName(e.target.value)}
+                  placeholder="Ex: Pets, Assinaturas..."
+                  className="w-full px-3 py-2 bg-[#1c1833] border border-purple-500/20 rounded-xl text-xs text-white outline-none"
+                />
+              </div>
+
+              <div>
+                <label className="block text-[11px] font-semibold text-purple-200/70 mb-1">Tipo</label>
+                <select
+                  value={newCatType}
+                  onChange={(e) => setNewCatType(e.target.value as 'despesa' | 'receita')}
+                  className="w-full px-3 py-2 bg-[#1c1833] border border-purple-500/20 rounded-xl text-xs text-white outline-none"
+                >
+                  <option value="despesa">Despesa</option>
+                  <option value="receita">Receita</option>
+                </select>
+              </div>
+            </div>
+
+            <button
+              type="button"
+              onClick={handleAddCustomCategory}
+              className="px-4 py-2 bg-purple-600 hover:bg-purple-500 text-white font-bold text-xs rounded-xl transition-all cursor-pointer inline-flex items-center gap-1.5"
+            >
+              <span className="material-symbols-outlined text-sm">add</span>
+              <span>Adicionar Categoria</span>
+            </button>
+          </div>
+
+          {/* Lista de categorias customizadas criadas */}
+          {formData.customCategories && formData.customCategories.length > 0 && (
+            <div className="space-y-2">
+              <h4 className="text-xs font-bold text-purple-200">Suas Categorias Personalizadas:</h4>
+              <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-3">
+                {formData.customCategories.map((cat) => (
+                  <div key={cat.id} className="p-3 bg-[#1c1833] rounded-2xl border border-purple-500/10 flex items-center justify-between">
+                    <div className="flex items-center gap-2">
+                      <span className="text-base">{cat.icon}</span>
+                      <div>
+                        <p className="text-xs font-bold text-white">{cat.name}</p>
+                        <p className="text-[10px] text-gray-400 capitalize">{cat.type}</p>
+                      </div>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => handleRemoveCustomCategory(cat.id)}
+                      className="p-1 text-rose-400 hover:bg-rose-500/10 rounded-lg transition-colors cursor-pointer"
+                      title="Excluir categoria"
+                    >
+                      <span className="material-symbols-outlined text-sm">delete</span>
+                    </button>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+        </div>
+
+        {/* MÚLTIPLAS METAS DE POUPANÇA */}
+        <div className="glass-card p-6 md:p-8 rounded-3xl border border-purple-500/20 space-y-6">
+          <div className="border-b border-purple-500/20 pb-3 flex items-center justify-between">
+            <div className="flex items-center gap-2">
+              <span className="material-symbols-outlined text-purple-400">savings</span>
+              <div>
+                <h3 className="text-base font-bold text-white">Múltiplas Metas de Poupança</h3>
+                <p className="text-xs text-purple-200/60">Cadastre e acompanhe vários objetivos de economia em simultâneo</p>
+              </div>
+            </div>
+          </div>
+
+          {/* Form para adicionar nova meta */}
+          <div className="p-4 bg-[#120f24] rounded-2xl border border-purple-500/20 space-y-3">
+            <h4 className="text-xs font-bold text-white">Nova Meta de Poupança</h4>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              <div>
+                <label className="block text-[11px] font-semibold text-purple-200/70 mb-1">Título da Meta</label>
+                <input
+                  type="text"
+                  value={newGoalTitle}
+                  onChange={(e) => setNewGoalTitle(e.target.value)}
+                  placeholder="Ex: Viagem de Férias, Carro Novo..."
+                  className="w-full px-3 py-2 bg-[#1c1833] border border-purple-500/20 rounded-xl text-xs text-white outline-none"
+                />
+              </div>
+
+              <div>
+                <label className="block text-[11px] font-semibold text-purple-200/70 mb-1">Descrição</label>
+                <input
+                  type="text"
+                  value={newGoalDesc}
+                  onChange={(e) => setNewGoalDesc(e.target.value)}
+                  placeholder="Ex: Economia para Dezembro"
+                  className="w-full px-3 py-2 bg-[#1c1833] border border-purple-500/20 rounded-xl text-xs text-white outline-none"
+                />
+              </div>
+
+              <div>
+                <label className="block text-[11px] font-semibold text-purple-200/70 mb-1">Valor Guardado Atual (R$)</label>
+                <input
+                  type="number"
+                  value={newGoalCurrent}
+                  onChange={(e) => setNewGoalCurrent(e.target.value)}
+                  placeholder="0.00"
+                  className="w-full px-3 py-2 bg-[#1c1833] border border-purple-500/20 rounded-xl text-xs text-white outline-none"
+                />
+              </div>
+
+              <div>
+                <label className="block text-[11px] font-semibold text-purple-200/70 mb-1">Meta Final Objetivo (R$)</label>
+                <input
+                  type="number"
+                  value={newGoalTarget}
+                  onChange={(e) => setNewGoalTarget(e.target.value)}
+                  placeholder="5000.00"
+                  className="w-full px-3 py-2 bg-[#1c1833] border border-purple-500/20 rounded-xl text-xs text-white outline-none"
+                />
+              </div>
+            </div>
+
+            <button
+              type="button"
+              onClick={handleAddSavingsGoal}
+              className="px-4 py-2 bg-purple-600 hover:bg-purple-500 text-white font-bold text-xs rounded-xl transition-all cursor-pointer inline-flex items-center gap-1.5"
+            >
+              <span className="material-symbols-outlined text-sm">add</span>
+              <span>Adicionar Meta</span>
+            </button>
+          </div>
+
+          {/* Lista de Metas */}
+          {formData.savingsGoals && formData.savingsGoals.length > 0 && (
+            <div className="space-y-3">
+              <h4 className="text-xs font-bold text-purple-200">Suas Metas Cadastradas:</h4>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                {formData.savingsGoals.map((goal) => (
+                  <div key={goal.id} className="p-4 bg-[#1c1833] rounded-2xl border border-purple-500/10 space-y-2">
+                    <div className="flex items-center justify-between">
+                      <div>
+                        <h5 className="text-xs font-bold text-white">{goal.title}</h5>
+                        <p className="text-[10px] text-gray-400">{goal.description}</p>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => handleRemoveSavingsGoal(goal.id)}
+                        className="p-1 text-rose-400 hover:bg-rose-500/10 rounded-lg transition-colors cursor-pointer"
+                        title="Excluir meta"
+                      >
+                        <span className="material-symbols-outlined text-sm">delete</span>
+                      </button>
+                    </div>
+
+                    <div className="text-xs flex justify-between font-semibold text-purple-200">
+                      <span>R$ {goal.currentAmount.toFixed(2)} de R$ {goal.targetAmount.toFixed(2)}</span>
+                      <span className="text-emerald-400 font-bold">
+                        {goal.targetAmount > 0 ? Math.round((goal.currentAmount / goal.targetAmount) * 100) : 0}%
+                      </span>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
         </div>
 
         {/* ORÇAMENTO POR CATEGORIA */}

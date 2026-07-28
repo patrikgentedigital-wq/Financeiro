@@ -9,6 +9,16 @@ describe('Recurring Transactions Utility', () => {
     expect(addRecurrenceInterval('2026-01-15', 'anual')).toBe('2027-01-15');
   });
 
+  it('deve tratar com segurança o final de mês (Ex: 31 de Janeiro para 28 de Fevereiro)', () => {
+    const nextMonth = addRecurrenceInterval('2026-01-31', 'mensal');
+    expect(nextMonth).toBe('2026-02-28');
+  });
+
+  it('deve tratar o dia 29 de Fevereiro de ano bissexto para ano não bissexto (2028-02-29 para 2029)', () => {
+    const nextYear = addRecurrenceInterval('2028-02-29', 'anual');
+    expect(nextYear).toBe('2029-02-28');
+  });
+
   it('deve gerar ocorrências sem duplicar datas existentes', () => {
     const baseTx: Transaction = {
       id: 'tx-parent-1',

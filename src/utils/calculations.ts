@@ -1,4 +1,4 @@
-import { Transaction, CategoryBudget } from '../types';
+import { Transaction, CategoryBudget, CoupleBalanceResult } from '../types';
 import { getCategoryEmoji } from '../data/categories';
 
 export interface FinancialTotals {
@@ -43,6 +43,13 @@ const CATEGORY_COLORS = [
   '#64748b',
 ];
 
+// Helper para verificar se a categoria é de ajuste de acerto de contas (deve ser excluída dos totais)
+export function isAdjustmentCategory(category?: string): boolean {
+  if (!category) return false;
+  const catLower = category.toLowerCase().trim();
+  return catLower === 'ajustes' || catLower === 'acerto de contas' || catLower.includes('ajuste');
+}
+
 /**
  * Safely rounds a currency number to two decimal places
  */
@@ -52,12 +59,15 @@ export function roundCurrency(value: number): number {
 
 /**
  * Calculates total income, expenses, balance, and savings rate with precision
+ * Exclui a categoria 'Ajustes' para evitar inflar artificialmente o total gasto do casal nas quitações
  */
 export function calculateFinancialTotals(transactions: Transaction[]): FinancialTotals {
   let rawIncome = 0;
   let rawExpenses = 0;
 
   transactions.forEach((t) => {
+    if (isAdjustmentCategory(t.category)) return;
+
     const amount = Math.abs(Number(t.amount) || 0);
     if (t.type === 'receita') {
       rawIncome += amount;
@@ -76,6 +86,7 @@ export function calculateFinancialTotals(transactions: Transaction[]): Financial
 
 /**
  * Groups transactions by category and calculates percentage breakdown
+ * Exclui a categoria 'Ajustes'
  */
 export function getCategoryBreakdown(
   transactions: Transaction[],
@@ -85,6 +96,8 @@ export function getCategoryBreakdown(
   let totalForType = 0;
 
   transactions.forEach((t) => {
+    if (isAdjustmentCategory(t.category)) return;
+
     if (t.type === targetType) {
       const amount = Math.abs(Number(t.amount) || 0);
       expenseMap[t.category] = (expenseMap[t.category] || 0) + amount;
@@ -135,7 +148,9 @@ export function getSixMonthHistory(transactions: Transaction[]): MonthlyHistoryI
 
   // Aggregate actual transactions
   transactions.forEach((t) => {
+    if (isAdjustmentCategory(t.category)) return;
     if (!t.date || t.date.length < 7) return;
+
     const key = t.date.slice(0, 7); // YYYY-MM
     const match = months.find((m) => m.monthKey === key);
     if (match) {
@@ -186,11 +201,11 @@ export function calculateCategoryBudgetProgress(
 ): CategoryBudgetProgressItem[] {
   if (!categoryBudgets || categoryBudgets.length === 0) return [];
 
-  // Consider current month expenses only
   const currentMonthKey = new Date().toISOString().slice(0, 7);
 
   const spentMap: Record<string, number> = {};
   transactions.forEach((t) => {
+    if (isAdjustmentCategory(t.category)) return;
     if (t.type === 'despesa' && t.date && t.date.startsWith(currentMonthKey)) {
       const amt = Math.abs(Number(t.amount) || 0);
       spentMap[t.category] = (spentMap[t.category] || 0) + amt;
@@ -220,4 +235,108 @@ export function calculateCategoryBudgetProgress(
       };
     })
     .sort((a, b) => b.percentage - a.percentage);
+}
+
+/**
+ * APURAÇÃO DE ACERTO DE CONTAS DO CASAL (50/50)
+ * Regra:
+ * - Só considera despesas compartilhadas (isShared === true && type === 'despesa')
+ * - Ignora categoria de Ajustes/Acertos anteriores
+ * - paidBy === 'Casal' (ou vazio) é considerado fundo comum (não gera dívida)
+ * - paidBy com o nome de um parceiro indica que ele adiantou 100% da despesa compartilhada
+ * - O outro parceiro deve 50% desse valor.
+ */
+export function calculateCoupleBalance(
+  transactions: Transaction[],
+  partner1Name?: string,
+  partner2Name?: string
+): CoupleBalanceResult {
+  const p1Raw = (partner1Name || '').trim();
+  const p2Raw = (partner2Name || '').trim();
+
+  const p1Lower = p1Raw.toLowerCase();
+  const p2Lower = p2Raw.toLowerCase();
+
+  const hasNamesConfigured = Boolean(p1Raw && p2Raw && p1Lower !== p2Lower);
+
+  if (!hasNamesConfigured) {
+    return {
+      p1Name: p1Raw || 'Parceiro 1',
+      p2Name: p2Raw || 'Parceiro 2',
+      p1Paid: 0,
+      p2Paid: 0,
+      sharedTotal: 0,
+      netBalance: 0,
+      debtorName: '',
+      creditorName: '',
+      amountOwed: 0,
+      isSettled: true,
+      hasNamesConfigured: false,
+    };
+  }
+
+  let p1Paid = 0;
+  let p2Paid = 0;
+  let sharedTotal = 0;
+
+  transactions.forEach((t) => {
+    if (!t.isShared || t.type !== 'despesa' || isAdjustmentCategory(t.category)) return;
+
+    const amt = Math.abs(Number(t.amount) || 0);
+    sharedTotal += amt;
+
+    const paidByLower = (t.paidBy || '').trim().toLowerCase();
+
+    if (!paidByLower || paidByLower === 'casal') {
+      // Pago por ambos / fundo comum
+      return;
+    }
+
+    if (paidByLower === p1Lower) {
+      p1Paid += amt;
+    } else if (paidByLower === p2Lower) {
+      p2Paid += amt;
+    }
+    // Se paidBy for um nome órfão/desconhecido (ex: "Maria"), é ignorado com segurança.
+  });
+
+  p1Paid = roundCurrency(p1Paid);
+  p2Paid = roundCurrency(p2Paid);
+  sharedTotal = roundCurrency(sharedTotal);
+
+  // Cada um é responsável por 50% das despesas compartilhadas
+  // Se P1 pagou P1Paid, o crédito dele é P1Paid / 2
+  // Se P2 pagou P2Paid, o crédito dele é P2Paid / 2
+  const netBalance = roundCurrency(p1Paid / 2 - p2Paid / 2);
+
+  let debtorName = '';
+  let creditorName = '';
+  let amountOwed = Math.abs(netBalance);
+  let isSettled = amountOwed < 0.01;
+
+  if (!isSettled) {
+    if (netBalance > 0) {
+      // P1 pagou a mais -> P2 deve a P1
+      debtorName = p2Raw;
+      creditorName = p1Raw;
+    } else {
+      // P2 pagou a mais -> P1 deve a P2
+      debtorName = p1Raw;
+      creditorName = p2Raw;
+    }
+  }
+
+  return {
+    p1Name: p1Raw,
+    p2Name: p2Raw,
+    p1Paid,
+    p2Paid,
+    sharedTotal,
+    netBalance,
+    debtorName,
+    creditorName,
+    amountOwed,
+    isSettled,
+    hasNamesConfigured: true,
+  };
 }

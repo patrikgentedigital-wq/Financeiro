@@ -2,8 +2,8 @@ import React, { useState, useMemo } from 'react';
 import { Transaction, UserProfile, ViewMode } from '../types';
 
 interface DailyTipCardProps {
-  user: UserProfile;
-  transactions: Transaction[];
+  user?: UserProfile;
+  transactions?: Transaction[];
   savingsGoal?: {
     id: string;
     title: string;
@@ -11,9 +11,9 @@ interface DailyTipCardProps {
     currentAmount: number;
     targetAmount: number;
   };
-  onNavigate: (view: ViewMode) => void;
-  onOpenTopUp: () => void;
-  onOpenNewTransaction: () => void;
+  onNavigate?: (view: ViewMode) => void;
+  onOpenTopUp?: () => void;
+  onOpenNewTransaction?: () => void;
 }
 
 export interface TipItem {
@@ -32,7 +32,7 @@ export interface TipItem {
 
 export const DailyTipCard: React.FC<DailyTipCardProps> = ({
   user,
-  transactions,
+  transactions = [],
   savingsGoal,
   onNavigate,
   onOpenTopUp,
@@ -47,7 +47,7 @@ export const DailyTipCard: React.FC<DailyTipCardProps> = ({
     const list: TipItem[] = [];
 
     // Calculate expense metrics from transactions
-    const expenses = transactions.filter((t) => t.type === 'despesa');
+    const expenses = (transactions || []).filter((t) => t.type === 'despesa');
     const totalExpenses = expenses.reduce((sum, t) => sum + Math.abs(t.amount), 0);
 
     // Group expenses by category
@@ -97,7 +97,7 @@ export const DailyTipCard: React.FC<DailyTipCardProps> = ({
           badgeBg: 'bg-indigo-950/60',
           icon: 'savings',
           title: `Meta do Casal: "${savingsGoal.title}"!`,
-          description: `Sua meta em dupla está em ${goalPercentage}%. Se guardarem R$ ${weeklyDeposit.toLocaleString('pt-BR')} por semana juntos, alcançarão o objetivo em poucas semanas.`,
+          description: `Sua meta em dupla está em ${goalPercentage}%. Se guardaren R$ ${weeklyDeposit.toLocaleString('pt-BR')} por semana juntos, alcançarão o objetivo em poucas semanas.`,
           impact: `Restam R$ ${remainingAmount.toLocaleString('pt-BR')}`,
           actionText: 'Registrar Transação',
           actionType: 'new_transaction',
@@ -106,7 +106,7 @@ export const DailyTipCard: React.FC<DailyTipCardProps> = ({
     }
 
     // Tip 3: Emergency reserve for couples
-    const monthlyIncome = user.monthlyIncomeGoal || 8000;
+    const monthlyIncome = user?.monthlyIncomeGoal || 8000;
     const recommendedEmergencyFund = totalExpenses > 0 ? totalExpenses * 3 : monthlyIncome * 3;
     list.push({
       id: 'emergency-reserve',
@@ -152,11 +152,11 @@ export const DailyTipCard: React.FC<DailyTipCardProps> = ({
   };
 
   const handleAction = () => {
-    if (activeTip.actionType === 'navigate' && activeTip.targetView) {
+    if (activeTip.actionType === 'navigate' && activeTip.targetView && onNavigate) {
       onNavigate(activeTip.targetView);
-    } else if (activeTip.actionType === 'topup') {
+    } else if (activeTip.actionType === 'topup' && onOpenTopUp) {
       onOpenTopUp();
-    } else if (activeTip.actionType === 'new_transaction') {
+    } else if (activeTip.actionType === 'new_transaction' && onOpenNewTransaction) {
       onOpenNewTransaction();
     }
   };

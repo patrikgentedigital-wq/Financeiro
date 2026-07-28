@@ -536,6 +536,7 @@ export function App() {
               }}
               onDeleteTransaction={handleDeleteTransaction}
               onEditTransaction={handleOpenEditModal}
+              onAddTransaction={handleAddTransaction}
             />
           )}
 

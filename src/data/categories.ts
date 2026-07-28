@@ -1,25 +1,27 @@
 export interface CategoryDef {
+  id: string;
   name: string;
   emoji: string;
+  icon: string;
   color: string;
   type: 'despesa' | 'receita';
 }
 
 export const EXPENSE_CATEGORIES: CategoryDef[] = [
-  { name: 'Alimentação', emoji: '🍔', color: '#f59e0b', type: 'despesa' },
-  { name: 'Moradia', emoji: '🏠', color: '#8b5cf6', type: 'despesa' },
-  { name: 'Transporte', emoji: '🚗', color: '#3b82f6', type: 'despesa' },
-  { name: 'Saúde', emoji: '🩺', color: '#ec4899', type: 'despesa' },
-  { name: 'Lazer', emoji: '🎮', color: '#10b981', type: 'despesa' },
-  { name: 'Educação', emoji: '📚', color: '#6366f1', type: 'despesa' },
-  { name: 'Vestuário', emoji: '👕', color: '#a855f7', type: 'despesa' },
-  { name: 'Outros', emoji: '📦', color: '#64748b', type: 'despesa' },
+  { id: '1', name: 'Alimentação', emoji: '🍔', icon: '🍔', color: '#f59e0b', type: 'despesa' },
+  { id: '2', name: 'Moradia', emoji: '🏠', icon: '🏠', color: '#8b5cf6', type: 'despesa' },
+  { id: '3', name: 'Transporte', emoji: '🚗', icon: '🚗', color: '#3b82f6', type: 'despesa' },
+  { id: '4', name: 'Saúde', emoji: '🩺', icon: '🩺', color: '#ec4899', type: 'despesa' },
+  { id: '5', name: 'Lazer', emoji: '🎮', icon: '🎮', color: '#10b981', type: 'despesa' },
+  { id: '6', name: 'Educação', emoji: '📚', icon: '📚', color: '#6366f1', type: 'despesa' },
+  { id: '7', name: 'Vestuário', emoji: '👕', icon: '👕', color: '#a855f7', type: 'despesa' },
+  { id: '8', name: 'Outros', emoji: '📦', icon: '📦', color: '#64748b', type: 'despesa' },
 ];
 
 export const INCOME_CATEGORIES: CategoryDef[] = [
-  { name: 'Salário', emoji: '💼', color: '#10b981', type: 'receita' },
-  { name: 'Freelance', emoji: '💻', color: '#8b5cf6', type: 'receita' },
-  { name: 'Outros', emoji: '💰', color: '#f59e0b', type: 'receita' },
+  { id: '9', name: 'Salário', emoji: '💼', icon: '💼', color: '#10b981', type: 'receita' },
+  { id: '10', name: 'Freelance', emoji: '💻', icon: '💻', color: '#8b5cf6', type: 'receita' },
+  { id: '11', name: 'Outros', emoji: '💰', icon: '💰', color: '#f59e0b', type: 'receita' },
 ];
 
 export const ALL_CATEGORIES = [...EXPENSE_CATEGORIES, ...INCOME_CATEGORIES];

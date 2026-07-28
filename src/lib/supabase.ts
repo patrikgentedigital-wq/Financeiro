@@ -1,5 +1,5 @@
 import { createClient } from '@supabase/supabase-js';
-import { Transaction, CategoryBudget } from '../types';
+import { Transaction, CategoryBudget, UserProfile, TransactionType } from '../types';
 
 // ============================================================================
 // CONFIGURAÇÃO DO SUPABASE (VIA VARIÁVEIS DE AMBIENTE SANITIZADAS)
@@ -174,6 +174,8 @@ export async function updateUserProfileInSupabase(profile: Partial<UserProfile>)
         avatarUrl: profile.avatarUrl,
         totalBudgetGoal: profile.totalBudgetGoal,
         monthlyIncomeGoal: profile.monthlyIncomeGoal,
+        customCategories: profile.customCategories,
+        savingsGoals: profile.savingsGoals,
       },
     });
     if (error) return { success: false, error: error.message };
@@ -218,9 +220,9 @@ export async function fetchAllTransactionsFromSupabase(): Promise<Transaction[] 
       }
 
       if (data && data.length > 0) {
-        const mapped = data.map((item: any) => {
+        const mapped: Transaction[] = data.map((item: any) => {
           const rawType = (item.type || '').toLowerCase();
-          const normalizedType = rawType === 'income' || rawType === 'receita' ? 'receita' : 'despesa';
+          const normalizedType: TransactionType = rawType === 'income' || rawType === 'receita' ? 'receita' : 'despesa';
 
           return {
             id: String(item.id),
@@ -242,6 +244,7 @@ export async function fetchAllTransactionsFromSupabase(): Promise<Transaction[] 
         });
 
         allTransactions = [...allTransactions, ...mapped];
+
         hasMore = data.length === pageSize;
         page++;
       } else {

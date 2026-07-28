@@ -1,11 +1,12 @@
 import React, { useState } from 'react';
-import { ViewMode, UserProfile } from '../types';
+import { ViewMode, UserProfile, Transaction } from '../types';
 import { isSupabaseConfigured } from '../lib/supabase';
 
 interface NavigationProps {
   currentView: ViewMode;
   onNavigate: (view: ViewMode) => void;
   user: UserProfile;
+  transactions?: Transaction[];
   onOpenNewTransaction: () => void;
   globalSearchQuery: string;
   onSearchChange: (query: string) => void;

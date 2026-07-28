@@ -6,11 +6,11 @@ import { Transaction, RecurrenceFrequency } from '../types';
 export function addRecurrenceInterval(dateStr: string, frequency: RecurrenceFrequency): string {
   const [yyyy, mm, dd] = dateStr.split('-').map(Number);
   const d = new Date(yyyy, mm - 1, dd);
+  const originalDay = dd;
 
   if (frequency === 'semanal') {
     d.setDate(d.getDate() + 7);
   } else if (frequency === 'mensal') {
-    const originalDay = dd;
     d.setMonth(d.getMonth() + 1);
     // Tratar estouro de mês (ex: 31 de janeiro -> 28/29 de fevereiro)
     if (d.getDate() !== originalDay && d.getDate() < 7) {
@@ -18,6 +18,10 @@ export function addRecurrenceInterval(dateStr: string, frequency: RecurrenceFreq
     }
   } else if (frequency === 'anual') {
     d.setFullYear(d.getFullYear() + 1);
+    // Tratar estouro de ano bissexto (ex: 29 de fevereiro -> 28 de fevereiro no ano seguinte)
+    if (d.getDate() !== originalDay && d.getDate() < 7) {
+      d.setDate(0);
+    }
   }
 
   const newYyyy = d.getFullYear();
