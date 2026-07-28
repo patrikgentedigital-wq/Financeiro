@@ -259,6 +259,23 @@ export function App() {
     }
   }, [isAuthenticated]);
 
+  // MOVIDO PARA O TOPO (ANTES DOS RETORNOS CONDICIONAIS) PARA EVITAR ERRO REACT #310
+  const activeUser: UserProfile = useMemo(() => {
+    if (!user.savingsGoal) return user;
+    const dynamicCurrent = calculateSavingsGoalProgress(transactions);
+    return {
+      ...user,
+      savingsGoal: {
+        ...user.savingsGoal,
+        currentAmount: dynamicCurrent,
+      },
+    };
+  }, [user, transactions]);
+
+  const pendingSyncCount = useMemo(() => {
+    return transactions.filter((t) => t.pendingSync).length;
+  }, [transactions]);
+
   const handleToggleDarkMode = () => {
     setIsDarkMode((prev) => !prev);
   };
@@ -439,6 +456,7 @@ export function App() {
     setEditingTransaction(null);
   };
 
+  // RETORNOS CONDICIONAIS SOMENTE APÓS TODOS OS HOOKS
   if (isAuthChecking) {
     return (
       <div className="min-h-screen bg-[#0f0c1b] flex items-center justify-center p-4">
@@ -455,22 +473,6 @@ export function App() {
   if (!isAuthenticated) {
     return <LoginView onLogin={handleLogin} />;
   }
-
-  const activeUser: UserProfile = useMemo(() => {
-    if (!user.savingsGoal) return user;
-    const dynamicCurrent = calculateSavingsGoalProgress(transactions);
-    return {
-      ...user,
-      savingsGoal: {
-        ...user.savingsGoal,
-        currentAmount: dynamicCurrent,
-      },
-    };
-  }, [user, transactions]);
-
-  const pendingSyncCount = useMemo(() => {
-    return transactions.filter((t) => t.pendingSync).length;
-  }, [transactions]);
 
   return (
     <div className="min-h-screen bg-[#0f0c1b] text-white selection:bg-purple-500 selection:text-white font-['Inter',sans-serif]">
