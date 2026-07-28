@@ -86,11 +86,24 @@ export function App() {
     supabase.auth.getSession().then(({ data: { session } }) => {
       if (session?.user) {
         setIsAuthenticated(true);
+        const meta = session.user.user_metadata || {};
         const userEmail = session.user.email || 'casal@financasdocasal.app';
-        const userName = session.user.user_metadata?.name || 'Alex & Sam';
-        const updatedUser = { ...user, id: session.user.id, email: userEmail, name: userName };
-        setUser(updatedUser);
-        localStorage.setItem('financas_casal_user', JSON.stringify(updatedUser));
+        setUser((prev) => {
+          const updatedUser: UserProfile = {
+            ...prev,
+            id: session.user.id,
+            email: userEmail,
+            name: meta.name || prev.name || 'Alex & Sam',
+            subtitle: meta.subtitle || prev.subtitle || 'Planejamento Financeiro Juntos',
+            partner1Name: meta.partner1Name || prev.partner1Name,
+            partner2Name: meta.partner2Name || prev.partner2Name,
+            avatarUrl: meta.avatarUrl || prev.avatarUrl,
+            totalBudgetGoal: typeof meta.totalBudgetGoal === 'number' ? meta.totalBudgetGoal : prev.totalBudgetGoal,
+            monthlyIncomeGoal: typeof meta.monthlyIncomeGoal === 'number' ? meta.monthlyIncomeGoal : prev.monthlyIncomeGoal,
+          };
+          localStorage.setItem('financas_casal_user', JSON.stringify(updatedUser));
+          return updatedUser;
+        });
       } else {
         setIsAuthenticated(false);
       }
@@ -104,11 +117,24 @@ export function App() {
     } = supabase.auth.onAuthStateChange((event, session) => {
       if (event === 'SIGNED_IN' && session?.user) {
         setIsAuthenticated(true);
+        const meta = session.user.user_metadata || {};
         const userEmail = session.user.email || 'casal@financasdocasal.app';
-        const userName = session.user.user_metadata?.name || 'Alex & Sam';
-        const updatedUser = { ...user, id: session.user.id, email: userEmail, name: userName };
-        setUser(updatedUser);
-        localStorage.setItem('financas_casal_user', JSON.stringify(updatedUser));
+        setUser((prev) => {
+          const updatedUser: UserProfile = {
+            ...prev,
+            id: session.user.id,
+            email: userEmail,
+            name: meta.name || prev.name || 'Alex & Sam',
+            subtitle: meta.subtitle || prev.subtitle || 'Planejamento Financeiro Juntos',
+            partner1Name: meta.partner1Name || prev.partner1Name,
+            partner2Name: meta.partner2Name || prev.partner2Name,
+            avatarUrl: meta.avatarUrl || prev.avatarUrl,
+            totalBudgetGoal: typeof meta.totalBudgetGoal === 'number' ? meta.totalBudgetGoal : prev.totalBudgetGoal,
+            monthlyIncomeGoal: typeof meta.monthlyIncomeGoal === 'number' ? meta.monthlyIncomeGoal : prev.monthlyIncomeGoal,
+          };
+          localStorage.setItem('financas_casal_user', JSON.stringify(updatedUser));
+          return updatedUser;
+        });
       } else if (event === 'SIGNED_OUT') {
         setIsAuthenticated(false);
         localStorage.removeItem('financas_casal_user');

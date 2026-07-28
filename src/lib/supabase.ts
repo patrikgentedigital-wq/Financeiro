@@ -162,6 +162,28 @@ export async function signOutUser() {
   return !error;
 }
 
+export async function updateUserProfileInSupabase(profile: Partial<UserProfile>) {
+  if (!supabase) return { success: false };
+  try {
+    const { data, error } = await supabase.auth.updateUser({
+      data: {
+        name: profile.name,
+        subtitle: profile.subtitle,
+        partner1Name: profile.partner1Name,
+        partner2Name: profile.partner2Name,
+        avatarUrl: profile.avatarUrl,
+        totalBudgetGoal: profile.totalBudgetGoal,
+        monthlyIncomeGoal: profile.monthlyIncomeGoal,
+      },
+    });
+    if (error) return { success: false, error: error.message };
+    return { success: true, user: data.user };
+  } catch (err: any) {
+    return { success: false, error: err?.message || 'Erro ao atualizar perfil no Supabase.' };
+  }
+}
+
+
 // ============================================================================
 // SUPABASE DATA HELPERS (PAGINAÇÃO COMPLETA, RECORRÊNCIA, OCC E ORÇAMENTOS)
 // ============================================================================

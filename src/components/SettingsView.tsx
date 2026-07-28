@@ -1,6 +1,12 @@
 import React, { useState, useEffect } from 'react';
 import { UserProfile, CategoryBudget } from '../types';
-import { SUPABASE_URL, SUPABASE_ANON_KEY, isSupabaseConfigured, saveCategoryBudgetToSupabase } from '../lib/supabase';
+import {
+  SUPABASE_URL,
+  SUPABASE_ANON_KEY,
+  isSupabaseConfigured,
+  saveCategoryBudgetToSupabase,
+  updateUserProfileInSupabase,
+} from '../lib/supabase';
 import { EXPENSE_CATEGORIES } from '../data/categories';
 import { isPWAInstallable, promptPWAInstall, isStandalonePWA } from '../utils/pwa';
 
@@ -10,6 +16,14 @@ interface SettingsViewProps {
   onResetData: () => void;
   pendingSyncCount?: number;
 }
+
+// Avatares sugeridos pré-configurados
+const PRESET_AVATARS = [
+  { label: 'Casal Sorridente', url: 'https://images.unsplash.com/photo-1516589178581-6cd7833ae3b2?auto=format&fit=crop&q=80&w=300' },
+  { label: 'Casal Abraçado', url: 'https://images.unsplash.com/photo-1529156069898-49953e39b3ac?auto=format&fit=crop&q=80&w=300' },
+  { label: 'Casal Pôr do Sol', url: 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&q=80&w=300' },
+  { label: 'Casal Viagem', url: 'https://images.unsplash.com/photo-1469854523086-cc02fe5d8800?auto=format&fit=crop&q=80&w=300' },
+];
 
 export const SettingsView: React.FC<SettingsViewProps> = ({
   user,
@@ -37,6 +51,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
     return map;
   });
 
+  const [isSaving, setIsSaving] = useState(false);
   const [savedSuccess, setSavedSuccess] = useState(false);
   const [canInstall, setCanInstall] = useState(isPWAInstallable());
   const [isStandalone, setIsStandalone] = useState(isStandalonePWA());
@@ -74,8 +89,29 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
     }
   };
 
+  // Upload de Foto de Perfil Local do Dispositivo
+  const handleImageFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    if (file.size > 5 * 1024 * 1024) {
+      alert('Por favor, escolha uma imagem com menos de 5MB.');
+      return;
+    }
+
+    const reader = new FileReader();
+    reader.onload = (event) => {
+      const base64Url = event.target?.result as string;
+      if (base64Url) {
+        setFormData((prev) => ({ ...prev, avatarUrl: base64Url }));
+      }
+    };
+    reader.readAsDataURL(file);
+  };
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    setIsSaving(true);
 
     const updatedBudgetsList: CategoryBudget[] = [];
     for (const cat of EXPENSE_CATEGORIES) {
@@ -93,9 +129,16 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
       categoryBudgets: updatedBudgetsList,
     };
 
+    // 1. Salvar no Supabase Auth Metadata se estiver configurado
+    if (isSupabaseConfigured) {
+      await updateUserProfileInSupabase(updatedUser);
+    }
+
+    // 2. Atualizar estado local da aplicação e localStorage
     onUpdateUser(updatedUser);
+    setIsSaving(false);
     setSavedSuccess(true);
-    setTimeout(() => setSavedSuccess(false), 3000);
+    setTimeout(() => setSavedSuccess(false), 4000);
   };
 
   return (
@@ -106,14 +149,14 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
           Configurações da Conta
         </h1>
         <p className="text-xs text-purple-200/70 font-medium mt-1">
-          Ajustes do perfil do casal, status PWA/offline e integração Supabase
+          Ajustes do perfil do casal, foto de perfil, status PWA/offline e integração Supabase
         </p>
       </div>
 
       {savedSuccess && (
-        <div className="p-4 rounded-2xl bg-emerald-950/80 border border-emerald-500/40 text-emerald-200 text-xs font-bold flex items-center gap-2">
-          <span className="material-symbols-outlined text-base">check_circle</span>
-          <span>Alterações salvas com sucesso!</span>
+        <div className="p-4 rounded-2xl bg-emerald-950/80 border border-emerald-500/40 text-emerald-200 text-xs font-bold flex items-center gap-2 shadow-lg shadow-emerald-950/50 animate-in slide-in-from-top-2">
+          <span className="material-symbols-outlined text-lg text-emerald-400">check_circle</span>
+          <span>Configurações e foto de perfil salvas com sucesso no Supabase e no dispositivo!</span>
         </div>
       )}
 
@@ -202,12 +245,89 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
       </div>
 
       <form onSubmit={handleSubmit} className="space-y-6">
-        {/* Profile Card */}
+        {/* Profile Card & Avatar Uploader */}
         <div className="glass-card p-6 md:p-8 rounded-3xl border border-purple-500/20 space-y-6">
           <h3 className="text-base font-bold text-white border-b border-purple-500/20 pb-3 flex items-center gap-2">
             <span className="material-symbols-outlined text-purple-400">favorite</span>
-            Perfil do Casal
+            Perfil e Foto do Casal
           </h3>
+
+          {/* Avatar Upload Section */}
+          <div className="p-4 bg-[#120f24] rounded-2xl border border-purple-500/20 flex flex-col md:flex-row items-center gap-6">
+            {/* Image Preview */}
+            <div className="relative group">
+              <div className="w-24 h-24 rounded-full overflow-hidden border-4 border-purple-500/40 shadow-xl shadow-purple-900/30 bg-[#1c1833]">
+                <img
+                  src={formData.avatarUrl || 'https://images.unsplash.com/photo-1516589178581-6cd7833ae3b2?auto=format&fit=crop&q=80&w=300'}
+                  alt={formData.name}
+                  className="w-full h-full object-cover"
+                />
+              </div>
+              <label
+                htmlFor="avatar-file-input"
+                className="absolute bottom-0 right-0 w-8 h-8 rounded-full bg-purple-600 hover:bg-purple-500 text-white flex items-center justify-center cursor-pointer shadow-lg transition-transform active:scale-90 border-2 border-[#120f24]"
+                title="Alterar foto de perfil"
+              >
+                <span className="material-symbols-outlined text-base">photo_camera</span>
+              </label>
+              <input
+                id="avatar-file-input"
+                type="file"
+                accept="image/*"
+                onChange={handleImageFileUpload}
+                className="hidden"
+              />
+            </div>
+
+            {/* Avatar URL & Upload Controls */}
+            <div className="flex-1 space-y-3 w-full">
+              <div className="flex items-center justify-between flex-wrap gap-2">
+                <label className="text-xs font-bold text-white flex items-center gap-1.5">
+                  <span className="material-symbols-outlined text-purple-400 text-sm">image</span>
+                  <span>Foto de Perfil do Casal</span>
+                </label>
+                <label
+                  htmlFor="avatar-file-input"
+                  className="px-3 py-1 bg-purple-600/30 hover:bg-purple-600/50 text-purple-200 border border-purple-500/30 text-xs font-bold rounded-xl cursor-pointer transition-colors inline-flex items-center gap-1.5"
+                >
+                  <span className="material-symbols-outlined text-sm">upload_file</span>
+                  <span>Enviar Foto do Seu Dispositivo</span>
+                </label>
+              </div>
+
+              <div>
+                <input
+                  type="text"
+                  value={formData.avatarUrl}
+                  onChange={(e) => setFormData({ ...formData, avatarUrl: e.target.value })}
+                  placeholder="Ou cole aqui um link (URL) da imagem..."
+                  className="w-full px-4 py-2.5 bg-[#1c1833] border border-purple-500/20 rounded-xl text-xs text-white focus:ring-2 focus:ring-purple-500 outline-none font-mono text-[11px]"
+                />
+              </div>
+
+              {/* Presets */}
+              <div className="space-y-1">
+                <p className="text-[10px] text-gray-400 font-semibold">Ou escolha uma foto sugerida:</p>
+                <div className="flex items-center gap-2 overflow-x-auto pb-1">
+                  {PRESET_AVATARS.map((preset, idx) => (
+                    <button
+                      key={idx}
+                      type="button"
+                      onClick={() => setFormData({ ...formData, avatarUrl: preset.url })}
+                      className={`flex-shrink-0 w-9 h-9 rounded-full overflow-hidden border-2 transition-all cursor-pointer ${
+                        formData.avatarUrl === preset.url
+                          ? 'border-purple-400 scale-105 shadow-md shadow-purple-500/50'
+                          : 'border-transparent opacity-60 hover:opacity-100'
+                      }`}
+                      title={preset.label}
+                    >
+                      <img src={preset.url} alt={preset.label} className="w-full h-full object-cover" />
+                    </button>
+                  ))}
+                </div>
+              </div>
+            </div>
+          </div>
 
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             <div>
@@ -218,6 +338,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
                 type="text"
                 value={formData.name}
                 onChange={(e) => setFormData({ ...formData, name: e.target.value })}
+                placeholder="Ex: Alex & Sam"
                 className="w-full px-4 py-2.5 bg-[#120f24] border border-purple-500/20 rounded-xl text-xs text-white focus:ring-2 focus:ring-purple-500 outline-none"
               />
             </div>
@@ -230,6 +351,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
                 type="text"
                 value={formData.subtitle}
                 onChange={(e) => setFormData({ ...formData, subtitle: e.target.value })}
+                placeholder="Ex: Planejamento Financeiro Juntos"
                 className="w-full px-4 py-2.5 bg-[#120f24] border border-purple-500/20 rounded-xl text-xs text-white focus:ring-2 focus:ring-purple-500 outline-none"
               />
             </div>
@@ -344,9 +466,20 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
 
           <button
             type="submit"
-            className="px-6 py-3 rounded-2xl bg-gradient-to-r from-purple-600 to-indigo-600 text-white font-bold text-xs shadow-lg shadow-purple-900/40 hover:opacity-95 transition-all cursor-pointer"
+            disabled={isSaving}
+            className="px-6 py-3 rounded-2xl bg-gradient-to-r from-purple-600 to-indigo-600 text-white font-bold text-xs shadow-lg shadow-purple-900/40 hover:opacity-95 transition-all cursor-pointer flex items-center gap-2 disabled:opacity-50"
           >
-            Salvar Configurações
+            {isSaving ? (
+              <>
+                <span className="material-symbols-outlined text-sm animate-spin">progress_activity</span>
+                <span>Salvando...</span>
+              </>
+            ) : (
+              <>
+                <span className="material-symbols-outlined text-sm">save</span>
+                <span>Salvar Configurações</span>
+              </>
+            )}
           </button>
         </div>
       </form>
