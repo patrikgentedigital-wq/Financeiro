@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { Transaction, TransactionType, UserProfile, RecurrenceFrequency } from '../types';
 import { EXPENSE_CATEGORIES, INCOME_CATEGORIES } from '../data/categories';
 import { FormInput } from './common/FormInput';
+import { useFocusTrap } from '../hooks/useFocusTrap';
 
 interface NewTransactionModalProps {
   isOpen: boolean;
@@ -22,6 +23,8 @@ export const NewTransactionModal: React.FC<NewTransactionModalProps> = ({
 }) => {
   const partner1 = user?.partner1Name || 'Parceiro 1';
   const partner2 = user?.partner2Name || 'Parceiro 2';
+  
+  const modalRef = useFocusTrap(isOpen);
 
   const today = new Date().toISOString().split('T')[0];
   const [date, setDate] = useState(today);
@@ -124,7 +127,7 @@ export const NewTransactionModal: React.FC<NewTransactionModalProps> = ({
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/70 backdrop-blur-sm animate-in fade-in">
-      <div className="w-full max-w-lg glass-card p-6 md:p-8 rounded-3xl border border-purple-500/20 bg-[#131024]/95 shadow-2xl relative space-y-6 max-h-[90vh] overflow-y-auto">
+      <div ref={modalRef} role="dialog" aria-modal="true" aria-labelledby="modal-title" className="w-full max-w-lg glass-card p-6 md:p-8 rounded-3xl border border-purple-500/20 bg-[#131024]/95 shadow-2xl relative space-y-6 max-h-[90vh] overflow-y-auto">
         {/* Header */}
         <div className="flex items-center justify-between border-b border-purple-500/10 pb-4">
           <div className="flex items-center gap-3">
@@ -134,7 +137,7 @@ export const NewTransactionModal: React.FC<NewTransactionModalProps> = ({
               </span>
             </div>
             <div>
-              <h2 className="text-lg font-bold text-white">
+              <h2 id="modal-title" className="text-lg font-bold text-white">
                 {initialTx ? 'Editar Transação' : 'Nova Transação'}
               </h2>
               <p className="text-xs text-purple-200/60">
@@ -144,7 +147,8 @@ export const NewTransactionModal: React.FC<NewTransactionModalProps> = ({
           </div>
           <button
             onClick={onClose}
-            className="text-gray-400 hover:text-white p-1 rounded-xl hover:bg-purple-500/10 transition-colors cursor-pointer"
+            aria-label="Fechar"
+            className="text-gray-400 hover:text-white min-w-[44px] min-h-[44px] flex items-center justify-center rounded-xl hover:bg-purple-500/10 transition-colors cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-purple-500 focus-visible:ring-offset-2 focus-visible:ring-offset-[#0f0c1b]"
           >
             <span className="material-symbols-outlined">close</span>
           </button>
@@ -163,7 +167,7 @@ export const NewTransactionModal: React.FC<NewTransactionModalProps> = ({
             <button
               type="button"
               onClick={() => handleTypeChange('despesa')}
-              className={`py-2.5 rounded-xl text-xs font-bold transition-all cursor-pointer flex items-center justify-center gap-2 ${
+              className={`py-2.5 min-h-[44px] rounded-xl text-xs font-bold transition-all cursor-pointer flex items-center justify-center gap-2 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-purple-500 focus-visible:ring-offset-2 focus-visible:ring-offset-[#0f0c1b] ${
                 type === 'despesa'
                   ? 'bg-gradient-to-r from-rose-600 to-red-600 text-white shadow-md'
                   : 'text-gray-400 hover:text-white'
@@ -175,7 +179,7 @@ export const NewTransactionModal: React.FC<NewTransactionModalProps> = ({
             <button
               type="button"
               onClick={() => handleTypeChange('receita')}
-              className={`py-2.5 rounded-xl text-xs font-bold transition-all cursor-pointer flex items-center justify-center gap-2 ${
+              className={`py-2.5 min-h-[44px] rounded-xl text-xs font-bold transition-all cursor-pointer flex items-center justify-center gap-2 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-purple-500 focus-visible:ring-offset-2 focus-visible:ring-offset-[#0f0c1b] ${
                 type === 'receita'
                   ? 'bg-gradient-to-r from-emerald-600 to-teal-600 text-white shadow-md'
                   : 'text-gray-400 hover:text-white'
@@ -246,7 +250,7 @@ export const NewTransactionModal: React.FC<NewTransactionModalProps> = ({
               <button
                 type="button"
                 onClick={() => setIsRecurring(!isRecurring)}
-                className={`w-12 h-6 rounded-full transition-colors relative cursor-pointer ${
+                className={`w-12 h-6 rounded-full transition-colors relative cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-purple-500 focus-visible:ring-offset-2 focus-visible:ring-offset-[#0f0c1b] ${
                   isRecurring ? 'bg-purple-600' : 'bg-gray-700'
                 }`}
               >
@@ -294,7 +298,7 @@ export const NewTransactionModal: React.FC<NewTransactionModalProps> = ({
               <button
                 type="button"
                 onClick={() => setIsShared(!isShared)}
-                className={`w-12 h-6 rounded-full transition-colors relative cursor-pointer ${
+                className={`w-12 h-6 rounded-full transition-colors relative cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-purple-500 focus-visible:ring-offset-2 focus-visible:ring-offset-[#0f0c1b] ${
                   isShared ? 'bg-purple-600' : 'bg-gray-700'
                 }`}
               >
@@ -327,13 +331,13 @@ export const NewTransactionModal: React.FC<NewTransactionModalProps> = ({
             <button
               type="button"
               onClick={onClose}
-              className="px-4 py-2.5 rounded-xl border border-purple-500/20 text-xs font-semibold text-purple-200 hover:bg-purple-500/10 transition-colors cursor-pointer"
+              className="px-4 py-2.5 min-h-[44px] rounded-xl border border-purple-500/20 text-xs font-semibold text-purple-200 hover:bg-purple-500/10 transition-colors cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-purple-500 focus-visible:ring-offset-2 focus-visible:ring-offset-[#0f0c1b]"
             >
               Cancelar
             </button>
             <button
               type="submit"
-              className="px-6 py-2.5 rounded-xl bg-gradient-to-r from-purple-600 to-indigo-600 text-white font-bold text-xs shadow-lg shadow-purple-900/40 hover:opacity-95 transition-all cursor-pointer"
+              className="px-6 py-2.5 min-h-[44px] rounded-xl bg-gradient-to-r from-purple-600 to-indigo-600 text-white font-bold text-xs shadow-lg shadow-purple-900/40 hover:opacity-95 transition-all cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-purple-500 focus-visible:ring-offset-2 focus-visible:ring-offset-[#0f0c1b]"
             >
               {initialTx ? 'Salvar Alterações' : 'Adicionar Transação'}
             </button>

@@ -1,20 +1,5 @@
-import React, { useState, useEffect, useMemo, useCallback, Suspense } from 'react';
-import { ViewMode, Transaction, UserProfile, ToastNotification, OCCConflict } from './types';
-import { INITIAL_USER, INITIAL_TRANSACTIONS } from './data/initialData';
-import {
-  fetchAllTransactionsFromSupabase,
-  saveTransactionToSupabase,
-  saveTransactionBatchToSupabase,
-  deleteTransactionFromSupabase,
-  deleteRecurringScopeFromSupabase,
-  fetchCategoryBudgetsFromSupabase,
-  subscribeToTransactionsRealtime,
-  isSupabaseConfigured,
-  supabase,
-  signOutUser,
-  RealtimePayload,
-} from './lib/supabase';
-import { generateRecurringOccurrences } from './utils/recurring';
+import React, { useState, Suspense } from 'react';
+import { ViewMode } from './types';
 import { initPWAInstallListener } from './utils/pwa';
 import { Navigation } from './components/Navigation';
 import { DashboardView } from './components/DashboardView';
@@ -24,9 +9,12 @@ import { ErrorBoundary } from './components/ErrorBoundary';
 import { ConflictResolutionModal } from './components/ConflictResolutionModal';
 import { PWAInstallBanner } from './components/PWAInstallBanner';
 import { ViewSkeleton } from './components/ViewSkeleton';
-import { calculateSavingsGoalProgress } from './utils/calculations';
+import { useAuth } from './contexts/AuthContext';
+import { useTransactions } from './contexts/TransactionsContext';
+import { useToast } from './contexts/ToastContext';
+import { useTheme } from './contexts/ThemeContext';
 
-// Lazy-loaded Views e Modal (preservando named exports via .then)
+// Lazy-loaded Views e Modal
 const TransactionsView = React.lazy(() =>
   import('./components/TransactionsView').then((m) => ({ default: m.TransactionsView }))
 );
@@ -44,304 +32,30 @@ const NewTransactionModal = React.lazy(() =>
 initPWAInstallListener();
 
 export function App() {
-  const [isAuthChecking, setIsAuthChecking] = useState<boolean>(true);
+  const { isAuthChecking, isAuthenticated, handleLogin, handleLogout, setUser } = useAuth();
+  const {
+    transactions,
+    activeUser,
+    pendingSyncCount,
+    isNewTxModalOpen,
+    editingTransaction,
+    activeConflict,
+    handleAddTransaction,
+    handleUpdateTransaction,
+    handleDeleteTransaction,
+    handleResetData,
+    handleOpenEditModal,
+    handleCloseModal,
+    handleKeepLocalConflict,
+    handleUseServerConflict,
+    handleCancelConflict,
+    setIsNewTxModalOpen,
+  } = useTransactions();
+  const { toasts, dismissToast } = useToast();
+  const { isDarkMode, toggleDarkMode } = useTheme();
 
-  // User Profile
-  const [user, setUser] = useState<UserProfile>(() => {
-    const saved = localStorage.getItem('financas_casal_user');
-    if (saved) {
-      try {
-        return { ...INITIAL_USER, ...JSON.parse(saved) };
-      } catch (e) {
-        return INITIAL_USER;
-      }
-    }
-    return INITIAL_USER;
-  });
-
-  const [isAuthenticated, setIsAuthenticated] = useState<boolean>(false);
   const [currentView, setCurrentView] = useState<ViewMode>('dashboard');
-  const [transactions, setTransactions] = useState<Transaction[]>(() => {
-    const saved = localStorage.getItem('financas_casal_txs');
-    if (saved) {
-      try {
-        return JSON.parse(saved);
-      } catch (e) {
-        return INITIAL_TRANSACTIONS;
-      }
-    }
-    return INITIAL_TRANSACTIONS;
-  });
-
   const [globalSearchQuery, setGlobalSearchQuery] = useState<string>('');
-  const [isNewTxModalOpen, setIsNewTxModalOpen] = useState<boolean>(false);
-  const [editingTransaction, setEditingTransaction] = useState<Transaction | null>(null);
-  const [toasts, setToasts] = useState<ToastNotification[]>([]);
-
-  // OCC Conflict State
-  const [activeConflict, setActiveConflict] = useState<OCCConflict | null>(null);
-
-  // Dark Mode State
-  const [isDarkMode, setIsDarkMode] = useState<boolean>(() => {
-    const saved = localStorage.getItem('financas_casal_theme');
-    return saved ? saved === 'dark' : true;
-  });
-
-  // Supabase Auth Session Listener & Blocking Check
-  useEffect(() => {
-    if (!supabase) {
-      setIsAuthChecking(false);
-      return;
-    }
-
-    supabase.auth.getSession().then(({ data: { session } }) => {
-      if (session?.user) {
-        setIsAuthenticated(true);
-        const meta = session.user.user_metadata || {};
-        const userEmail = session.user.email || 'casal@financasdocasal.app';
-        setUser((prev) => {
-          const updatedUser: UserProfile = {
-            ...prev,
-            id: session.user.id,
-            email: userEmail,
-            name: meta.name || prev.name || 'Alex & Sam',
-            subtitle: meta.subtitle || prev.subtitle || 'Planejamento Financeiro Juntos',
-            partner1Name: meta.partner1Name || prev.partner1Name,
-            partner2Name: meta.partner2Name || prev.partner2Name,
-            avatarUrl: meta.avatarUrl || prev.avatarUrl,
-            totalBudgetGoal: typeof meta.totalBudgetGoal === 'number' ? meta.totalBudgetGoal : prev.totalBudgetGoal,
-            monthlyIncomeGoal: typeof meta.monthlyIncomeGoal === 'number' ? meta.monthlyIncomeGoal : prev.monthlyIncomeGoal,
-          };
-          localStorage.setItem('financas_casal_user', JSON.stringify(updatedUser));
-          return updatedUser;
-        });
-      } else {
-        setIsAuthenticated(false);
-      }
-      setIsAuthChecking(false);
-    }).catch(() => {
-      setIsAuthChecking(false);
-    });
-
-    const {
-      data: { subscription },
-    } = supabase.auth.onAuthStateChange((event, session) => {
-      if (event === 'SIGNED_IN' && session?.user) {
-        setIsAuthenticated(true);
-        const meta = session.user.user_metadata || {};
-        const userEmail = session.user.email || 'casal@financasdocasal.app';
-        setUser((prev) => {
-          const updatedUser: UserProfile = {
-            ...prev,
-            id: session.user.id,
-            email: userEmail,
-            name: meta.name || prev.name || 'Alex & Sam',
-            subtitle: meta.subtitle || prev.subtitle || 'Planejamento Financeiro Juntos',
-            partner1Name: meta.partner1Name || prev.partner1Name,
-            partner2Name: meta.partner2Name || prev.partner2Name,
-            avatarUrl: meta.avatarUrl || prev.avatarUrl,
-            totalBudgetGoal: typeof meta.totalBudgetGoal === 'number' ? meta.totalBudgetGoal : prev.totalBudgetGoal,
-            monthlyIncomeGoal: typeof meta.monthlyIncomeGoal === 'number' ? meta.monthlyIncomeGoal : prev.monthlyIncomeGoal,
-          };
-          localStorage.setItem('financas_casal_user', JSON.stringify(updatedUser));
-          return updatedUser;
-        });
-      } else if (event === 'SIGNED_OUT') {
-        setIsAuthenticated(false);
-        localStorage.removeItem('financas_casal_user');
-      }
-    });
-
-    return () => {
-      subscription.unsubscribe();
-    };
-  }, []);
-
-  useEffect(() => {
-    if (isDarkMode) {
-      document.documentElement.classList.add('dark');
-      document.documentElement.classList.remove('light');
-      localStorage.setItem('financas_casal_theme', 'dark');
-    } else {
-      document.documentElement.classList.add('light');
-      document.documentElement.classList.remove('dark');
-      localStorage.setItem('financas_casal_theme', 'light');
-    }
-  }, [isDarkMode]);
-
-  // Toast Helper
-  const addToast = useCallback((type: 'success' | 'danger' | 'info', message: string) => {
-    const id = `toast-${Date.now()}-${Math.random().toString(36).substr(2, 4)}`;
-    setToasts((prev) => [...prev, { id, type, message }]);
-    setTimeout(() => {
-      setToasts((prev) => prev.filter((t) => t.id !== id));
-    }, 4000);
-  }, []);
-
-  // FILA OFFLINE OUTBOX (Auto-retry na reconexão)
-  const syncPendingOutbox = useCallback(async () => {
-    if (!isSupabaseConfigured || !navigator.onLine) return;
-
-    const pendingTxs = transactions.filter((t) => t.pendingSync);
-    if (pendingTxs.length === 0) return;
-
-    let syncedCount = 0;
-    for (const tx of pendingTxs) {
-      const res = await saveTransactionToSupabase(tx);
-      if (res.success) {
-        syncedCount++;
-        setTransactions((prev) =>
-          prev.map((t) => (t.id === tx.id ? { ...t, pendingSync: false } : t))
-        );
-      }
-    }
-
-    if (syncedCount > 0) {
-      addToast(
-        'success',
-        `⚡ Sincronizados ${syncedCount} ${syncedCount === 1 ? 'lançamento offline' : 'lançamentos offline'} com a nuvem!`
-      );
-    }
-  }, [transactions, addToast]);
-
-  // Listener para evento 'online'
-  useEffect(() => {
-    const handleOnline = () => {
-      syncPendingOutbox();
-    };
-    window.addEventListener('online', handleOnline);
-    return () => {
-      window.removeEventListener('online', handleOnline);
-    };
-  }, [syncPendingOutbox]);
-
-  // Persist local user & transactions
-  useEffect(() => {
-    localStorage.setItem('financas_casal_txs', JSON.stringify(transactions));
-  }, [transactions]);
-
-  useEffect(() => {
-    if (isAuthenticated) {
-      localStorage.setItem('financas_casal_user', JSON.stringify(user));
-    }
-  }, [user, isAuthenticated]);
-
-  // Supabase Sync & Realtime Listener
-  useEffect(() => {
-    async function syncSupabase() {
-      const cloudTxs = await fetchAllTransactionsFromSupabase();
-      if (cloudTxs && cloudTxs.length > 0) {
-        setTransactions(cloudTxs);
-      }
-
-      const cloudBudgets = await fetchCategoryBudgetsFromSupabase();
-      if (cloudBudgets && cloudBudgets.length > 0) {
-        setUser((prev) => ({ ...prev, categoryBudgets: cloudBudgets }));
-      }
-    }
-
-    if (isSupabaseConfigured && isAuthenticated) {
-      syncSupabase();
-
-      const unsubscribe = subscribeToTransactionsRealtime((payload: RealtimePayload) => {
-        if (payload.eventType === 'INSERT' && payload.newRecord) {
-          const item = payload.newRecord;
-          if (item.is_deleted) return;
-          const newTx: Transaction = {
-            id: String(item.id),
-            date: item.date,
-            description: item.description,
-            amount: Math.abs(Number(item.amount)),
-            type: item.type === 'income' || item.type === 'receita' ? 'receita' : 'despesa',
-            category: item.category || 'Outros',
-            isShared: item.is_shared ?? true,
-            paidBy: item.paid_by || 'Casal',
-            version: Number(item.version) || 1,
-            isRecurring: Boolean(item.is_recurring),
-            recurrenceFrequency: item.recurrence_frequency,
-            recurrenceEndDate: item.recurrence_end_date,
-            recurrenceParentId: item.recurrence_parent_id,
-          };
-          setTransactions((prev) => [newTx, ...prev.filter((t) => t.id !== newTx.id)]);
-        } else if (payload.eventType === 'UPDATE' && payload.newRecord) {
-          const item = payload.newRecord;
-          if (item.is_deleted) {
-            setTransactions((prev) => prev.filter((t) => t.id !== String(item.id)));
-          } else {
-            const updatedTx: Transaction = {
-              id: String(item.id),
-              date: item.date,
-              description: item.description,
-              amount: Math.abs(Number(item.amount)),
-              type: item.type === 'income' || item.type === 'receita' ? 'receita' : 'despesa',
-              category: item.category || 'Outros',
-              isShared: item.is_shared ?? true,
-              paidBy: item.paid_by || 'Casal',
-              version: Number(item.version) || 1,
-              isRecurring: Boolean(item.is_recurring),
-              recurrenceFrequency: item.recurrence_frequency,
-              recurrenceEndDate: item.recurrence_end_date,
-              recurrenceParentId: item.recurrence_parent_id,
-            };
-            setTransactions((prev) => prev.map((t) => (t.id === updatedTx.id ? updatedTx : t)));
-          }
-        } else if (payload.eventType === 'DELETE' && payload.oldRecord) {
-          setTransactions((prev) => prev.filter((t) => t.id !== String(payload.oldRecord.id)));
-        }
-      });
-
-      return () => {
-        if (unsubscribe) unsubscribe();
-      };
-    }
-  }, [isAuthenticated]);
-
-  // MOVIDO PARA O TOPO (ANTES DOS RETORNOS CONDICIONAIS) PARA EVITAR ERRO REACT #310
-  const activeUser: UserProfile = useMemo(() => {
-    if (!user.savingsGoal) return user;
-    const dynamicCurrent = calculateSavingsGoalProgress(transactions);
-    return {
-      ...user,
-      savingsGoal: {
-        ...user.savingsGoal,
-        currentAmount: dynamicCurrent,
-      },
-    };
-  }, [user, transactions]);
-
-  const pendingSyncCount = useMemo(() => {
-    return transactions.filter((t) => t.pendingSync).length;
-  }, [transactions]);
-
-  const handleToggleDarkMode = () => {
-    setIsDarkMode((prev) => !prev);
-  };
-
-  const handleDismissToast = (id: string) => {
-    setToasts((prev) => prev.filter((t) => t.id !== id));
-  };
-
-  const handleLogin = (email: string, name?: string) => {
-    const updatedUser: UserProfile = {
-      ...user,
-      email,
-      name: name || user.name || 'Nosso Casal',
-    };
-    setUser(updatedUser);
-    setIsAuthenticated(true);
-    localStorage.setItem('financas_casal_user', JSON.stringify(updatedUser));
-    addToast('info', `Bem-vindo de volta, ${updatedUser.name}!`);
-  };
-
-  const handleLogout = async () => {
-    await signOutUser();
-    setIsAuthenticated(false);
-    localStorage.removeItem('financas_casal_user');
-    localStorage.removeItem('financas_casal_txs');
-    localStorage.removeItem('financas_casal_theme');
-    setTransactions([]);
-    addToast('info', 'Sessão encerrada com sucesso.');
-  };
 
   const handleSearchChange = (query: string) => {
     setGlobalSearchQuery(query);
@@ -350,150 +64,6 @@ export function App() {
     }
   };
 
-  // Add transaction com suporte a Fila Outbox Offline (pendingSync)
-  const handleAddTransaction = async (newTxData: Omit<Transaction, 'id'>) => {
-    const mainTxId = typeof crypto !== 'undefined' && crypto.randomUUID
-      ? crypto.randomUUID()
-      : `tx-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`;
-
-    const isOnline = typeof navigator !== 'undefined' && navigator.onLine;
-
-    const newTx: Transaction = {
-      ...newTxData,
-      id: mainTxId,
-      version: 1,
-      pendingSync: !isOnline,
-    };
-
-    let allGeneratedTxs = [newTx];
-
-    if (newTx.isRecurring) {
-      const generatedOccurrences = generateRecurringOccurrences(newTx, transactions, 12);
-      allGeneratedTxs = [newTx, ...generatedOccurrences.map((t) => ({ ...t, pendingSync: !isOnline }))];
-    }
-
-    setTransactions((prev) => [...allGeneratedTxs, ...prev]);
-
-    const typeLabel = newTx.type === 'receita' ? 'Receita' : 'Despesa';
-
-    if (!isOnline) {
-      addToast('info', `📲 ${typeLabel} "${newTx.description}" salva offline (será sincronizada ao reconectar).`);
-      return;
-    }
-
-    const res = await saveTransactionToSupabase(newTx);
-
-    if (allGeneratedTxs.length > 1) {
-      await saveTransactionBatchToSupabase(allGeneratedTxs.slice(1));
-    }
-
-    if (res.conflict && res.serverTx) {
-      setActiveConflict({ localTx: newTx, serverTx: res.serverTx });
-    } else if (isSupabaseConfigured && !res.success) {
-      // Marcar como pendingSync para retry futuro
-      setTransactions((prev) => prev.map((t) => (t.id === newTx.id ? { ...t, pendingSync: true } : t)));
-      addToast('info', `📲 ${typeLabel} "${newTx.description}" salva no dispositivo (pendente de nuvem).`);
-    } else {
-      const recLabel = newTx.isRecurring ? ` (com ${allGeneratedTxs.length - 1} repetições geradas)` : '';
-      addToast(
-        'success',
-        `✨ ${typeLabel} "${newTx.description}" de R$ ${newTx.amount.toFixed(2)} adicionada!${recLabel}`
-      );
-    }
-  };
-
-  const handleUpdateTransaction = async (updatedTx: Transaction, scope: 'single' | 'future' = 'single') => {
-    const parentId = updatedTx.recurrenceParentId || updatedTx.id;
-
-    if (updatedTx.isRecurring && scope === 'future') {
-      setTransactions((prev) =>
-        prev.map((t) => {
-          if ((t.id === parentId || t.recurrenceParentId === parentId) && t.date >= updatedTx.date) {
-            return {
-              ...updatedTx,
-              id: t.id,
-              date: t.date,
-              version: (t.version || 1) + 1,
-            };
-          }
-          return t;
-        })
-      );
-    } else {
-      setTransactions((prev) => prev.map((t) => (t.id === updatedTx.id ? updatedTx : t)));
-    }
-
-    const res = await saveTransactionToSupabase(updatedTx);
-
-    if (res.conflict && res.serverTx) {
-      setActiveConflict({ localTx: updatedTx, serverTx: res.serverTx });
-    } else if (isSupabaseConfigured && !res.success) {
-      addToast('info', `✏️ Transação "${updatedTx.description}" salva localmente.`);
-    } else {
-      addToast('success', `✏️ Transação "${updatedTx.description}" atualizada!`);
-    }
-
-    setEditingTransaction(null);
-  };
-
-  const handleKeepLocalConflict = async () => {
-    if (!activeConflict) return;
-    const { localTx } = activeConflict;
-    await saveTransactionToSupabase(localTx, true);
-    setActiveConflict(null);
-    addToast('info', `Sua versão da transação "${localTx.description}" foi mantida.`);
-  };
-
-  const handleUseServerConflict = () => {
-    if (!activeConflict) return;
-    const { serverTx } = activeConflict;
-    setTransactions((prev) => prev.map((t) => (t.id === serverTx.id ? serverTx : t)));
-    setActiveConflict(null);
-    addToast('info', `Atualizado para a versão mais recente do servidor.`);
-  };
-
-  const handleDeleteTransaction = async (id: string, scope: 'single' | 'future' = 'single') => {
-    const txToDelete = transactions.find((t) => t.id === id);
-    if (!txToDelete) return;
-
-    const parentId = txToDelete.recurrenceParentId || txToDelete.id;
-
-    if (txToDelete.isRecurring && scope === 'future') {
-      setTransactions((prev) =>
-        prev.filter((t) => {
-          if ((t.id === parentId || t.recurrenceParentId === parentId) && t.date >= txToDelete.date) {
-            return false;
-          }
-          return true;
-        })
-      );
-      await deleteRecurringScopeFromSupabase(parentId, txToDelete.date, 'future');
-      addToast('danger', `🗑️ Transações futuras de "${txToDelete.description}" foram excluídas.`);
-    } else {
-      setTransactions((prev) => prev.filter((t) => t.id !== id));
-      await deleteTransactionFromSupabase(id);
-      addToast('danger', `🗑️ Transação "${txToDelete.description}" foi excluída.`);
-    }
-  };
-
-  const handleResetData = () => {
-    setUser(INITIAL_USER);
-    setTransactions(INITIAL_TRANSACTIONS);
-    localStorage.removeItem('financas_casal_txs');
-    addToast('info', 'Dados restaurados para o padrão original.');
-  };
-
-  const handleOpenEditModal = (tx: Transaction) => {
-    setEditingTransaction(tx);
-    setIsNewTxModalOpen(true);
-  };
-
-  const handleCloseModal = () => {
-    setIsNewTxModalOpen(false);
-    setEditingTransaction(null);
-  };
-
-  // RETORNOS CONDICIONAIS SOMENTE APÓS TODOS OS HOOKS
   if (isAuthChecking) {
     return (
       <div className="min-h-screen bg-[#0f0c1b] flex items-center justify-center p-4">
@@ -520,14 +90,13 @@ export function App() {
         user={activeUser}
         transactions={transactions}
         onOpenNewTransaction={() => {
-          setEditingTransaction(null);
           setIsNewTxModalOpen(true);
         }}
         globalSearchQuery={globalSearchQuery}
         onSearchChange={handleSearchChange}
         onLogout={handleLogout}
         isDarkMode={isDarkMode}
-        onToggleDarkMode={handleToggleDarkMode}
+        onToggleDarkMode={toggleDarkMode}
       />
 
       {/* Main Container */}
@@ -543,7 +112,6 @@ export function App() {
                 transactions={transactions}
                 onNavigate={setCurrentView}
                 onOpenNewTransaction={() => {
-                  setEditingTransaction(null);
                   setIsNewTxModalOpen(true);
                 }}
                 onDeleteTransaction={handleDeleteTransaction}
@@ -556,7 +124,6 @@ export function App() {
               <TransactionsView
                 transactions={transactions}
                 onOpenNewTransaction={() => {
-                  setEditingTransaction(null);
                   setIsNewTxModalOpen(true);
                 }}
                 onDeleteTransaction={handleDeleteTransaction}
@@ -581,7 +148,7 @@ export function App() {
         </ErrorBoundary>
       </main>
 
-      {/* New / Edit Transaction Modal com Boundary Isolado */}
+      {/* New / Edit Transaction Modal */}
       <Suspense fallback={null}>
         {isNewTxModalOpen && (
           <NewTransactionModal
@@ -602,11 +169,11 @@ export function App() {
         serverTx={activeConflict?.serverTx || null}
         onKeepLocal={handleKeepLocalConflict}
         onUseServer={handleUseServerConflict}
-        onCancel={() => setActiveConflict(null)}
+        onCancel={handleCancelConflict}
       />
 
       {/* Toast Notifications */}
-      <ToastContainer toasts={toasts} onDismiss={handleDismissToast} />
+      <ToastContainer toasts={toasts} onDismiss={dismissToast} />
     </div>
   );
 }

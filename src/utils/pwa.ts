@@ -1,3 +1,11 @@
+interface NavigatorStandalone extends Navigator {
+  standalone?: boolean;
+}
+
+interface WindowWithPWA extends Window {
+  MSStream?: unknown;
+}
+
 export interface BeforeInstallPromptEvent extends Event {
   readonly platforms: string[];
   readonly userChoice: Promise<{
@@ -56,14 +64,14 @@ export async function promptPWAInstall(): Promise<boolean> {
 export function isStandalonePWA(): boolean {
   if (typeof window === 'undefined') return false;
   const isDisplayStandalone = window.matchMedia('(display-mode: standalone)').matches;
-  const isNavStandalone = (navigator as any).standalone === true;
+  const isNavStandalone = (navigator as NavigatorStandalone).standalone === true;
   return isDisplayStandalone || isNavStandalone;
 }
 
 export function isIOSSafari(): boolean {
   if (typeof window === 'undefined') return false;
   const ua = window.navigator.userAgent;
-  const isIOS = /iPad|iPhone|iPod/.test(ua) && !(window as any).MSStream;
+  const isIOS = /iPad|iPhone|iPod/.test(ua) && !(window as WindowWithPWA).MSStream;
   const isWebkit = /WebKit/i.test(ua);
   const isSafari = /Safari/i.test(ua) && !/CriOS/i.test(ua) && !/FxiOS/i.test(ua);
 

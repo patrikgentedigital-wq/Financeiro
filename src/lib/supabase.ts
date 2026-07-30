@@ -33,7 +33,40 @@ export const supabase = isSupabaseConfigured
 // ============================================================================
 // HELPER PARA SANITIZAÇÃO, PRECISÃO MONETÁRIA E NORMALIZAÇÃO DE TIPOS
 // ============================================================================
-export function sanitizeAndValidateTx(tx: Partial<Transaction>): { valid: boolean; data?: any; error?: string } {
+export function mapSupabaseRowToTransaction(item: Record<string, unknown>): Transaction {
+  const rawType = (typeof item.type === 'string' ? item.type : '').toLowerCase();
+  const normalizedType: TransactionType = rawType === 'income' || rawType === 'receita' ? 'receita' : 'despesa';
+
+  return {
+    id: String(item.id),
+    date: typeof item.date === 'string' ? item.date : new Date().toISOString().split('T')[0],
+    description: typeof item.description === 'string' ? item.description : '',
+    amount: Math.round(Math.abs(Number(item.amount)) * 100) / 100,
+    type: normalizedType,
+    category: typeof item.category === 'string' ? item.category : 'Outros',
+    isShared: typeof item.is_shared === 'boolean' ? item.is_shared : true,
+    paidBy: typeof item.paid_by === 'string' ? item.paid_by : 'Casal',
+    isDeleted: Boolean(item.is_deleted),
+    version: Number(item.version) || 1,
+    coupleId: typeof item.couple_id === 'string' ? item.couple_id : undefined,
+    isRecurring: Boolean(item.is_recurring),
+    recurrenceFrequency: (item.recurrence_frequency as any) || undefined,
+    recurrenceEndDate: typeof item.recurrence_end_date === 'string' ? item.recurrence_end_date : undefined,
+    recurrenceParentId: typeof item.recurrence_parent_id === 'string' ? item.recurrence_parent_id : undefined,
+  };
+}
+
+export async function getAuthenticatedUserId(): Promise<string | null> {
+  if (!supabase) return null;
+  try {
+    const { data: { user } } = await supabase.auth.getUser();
+    return user?.id || null;
+  } catch {
+    return null;
+  }
+}
+
+export function sanitizeAndValidateTx(tx: Partial<Transaction>): { valid: boolean; data?: Record<string, unknown>; error?: string } {
   const description = (tx.description || '').trim().slice(0, 255);
   // Arredondamento exato em duas casas decimais no JS
   const rawAmount = Math.abs(Number(tx.amount));
@@ -127,10 +160,11 @@ export async function signUpUser(email: string, password: string, name?: string,
     }
 
     return { data, error: null };
-  } catch (err: any) {
+  } catch (err: unknown) {
+    const message = err instanceof Error ? err.message : (err as Record<string, unknown>)?.message || 'Falha de conexão ao criar conta.';
     return {
       data: { user: null, session: null },
-      error: { message: err?.message || 'Falha de conexão ao criar conta.' },
+      error: { message: String(message) },
     };
   }
 }
@@ -148,10 +182,11 @@ export async function signInUser(email: string, password: string) {
       password,
     });
     return { data, error };
-  } catch (err: any) {
+  } catch (err: unknown) {
+    const message = err instanceof Error ? err.message : (err as Record<string, unknown>)?.message || 'Falha de conexão com o Supabase.';
     return {
       data: { user: null, session: null },
-      error: { message: err?.message || 'Falha de conexão com o Supabase.' },
+      error: { message: String(message) },
     };
   }
 }
@@ -180,8 +215,9 @@ export async function updateUserProfileInSupabase(profile: Partial<UserProfile>)
     });
     if (error) return { success: false, error: error.message };
     return { success: true, user: data.user };
-  } catch (err: any) {
-    return { success: false, error: err?.message || 'Erro ao atualizar perfil no Supabase.' };
+  } catch (err: unknown) {
+    const message = err instanceof Error ? err.message : (err as Record<string, unknown>)?.message || 'Erro ao atualizar perfil no Supabase.';
+    return { success: false, error: String(message) };
   }
 }
 
@@ -194,8 +230,7 @@ export async function updateUserProfileInSupabase(profile: Partial<UserProfile>)
 export async function fetchAllTransactionsFromSupabase(): Promise<Transaction[] | null> {
   if (!supabase) return null;
   try {
-    const { data: userData } = await supabase.auth.getUser();
-    const userId = userData?.user?.id;
+    const userId = await getAuthenticatedUserId();
     if (!userId) return null;
 
     let allTransactions: Transaction[] = [];
@@ -220,28 +255,7 @@ export async function fetchAllTransactionsFromSupabase(): Promise<Transaction[] 
       }
 
       if (data && data.length > 0) {
-        const mapped: Transaction[] = data.map((item: any) => {
-          const rawType = (item.type || '').toLowerCase();
-          const normalizedType: TransactionType = rawType === 'income' || rawType === 'receita' ? 'receita' : 'despesa';
-
-          return {
-            id: String(item.id),
-            date: item.date,
-            description: item.description,
-            amount: Math.round(Math.abs(Number(item.amount)) * 100) / 100,
-            type: normalizedType,
-            category: item.category || 'Outros',
-            isShared: item.is_shared ?? true,
-            paidBy: item.paid_by || 'Casal',
-            isDeleted: Boolean(item.is_deleted),
-            version: Number(item.version) || 1,
-            coupleId: item.couple_id,
-            isRecurring: Boolean(item.is_recurring),
-            recurrenceFrequency: item.recurrence_frequency,
-            recurrenceEndDate: item.recurrence_end_date,
-            recurrenceParentId: item.recurrence_parent_id,
-          };
-        });
+        const mapped: Transaction[] = data.map((item: Record<string, unknown>) => mapSupabaseRowToTransaction(item));
 
         allTransactions = [...allTransactions, ...mapped];
 
@@ -278,8 +292,7 @@ export async function saveTransactionToSupabase(
       return { success: false, error: validation.error || 'Transação inválida.' };
     }
 
-    const { data: userData } = await supabase.auth.getUser();
-    const userId = userData?.user?.id;
+    const userId = await getAuthenticatedUserId();
     if (!userId) return { success: false, error: 'Usuário não autenticado.' };
 
     const expectedVersion = tx.version || 1;
@@ -344,8 +357,9 @@ export async function saveTransactionToSupabase(
     }
 
     return { success: true };
-  } catch (err: any) {
-    return { success: false, error: err?.message || 'Erro ao processar salvamento.' };
+  } catch (err: unknown) {
+    const message = err instanceof Error ? err.message : (err as Record<string, unknown>)?.message || 'Erro ao processar salvamento.';
+    return { success: false, error: String(message) };
   }
 }
 
@@ -353,8 +367,7 @@ export async function saveTransactionToSupabase(
 export async function saveTransactionBatchToSupabase(txs: Transaction[]): Promise<boolean> {
   if (!supabase || txs.length === 0) return false;
   try {
-    const { data: userData } = await supabase.auth.getUser();
-    const userId = userData?.user?.id;
+    const userId = await getAuthenticatedUserId();
     if (!userId) return false;
 
     const payloads = txs.map((tx) => {
@@ -381,8 +394,7 @@ export async function deleteRecurringScopeFromSupabase(
 ): Promise<boolean> {
   if (!supabase) return false;
   try {
-    const { data: userData } = await supabase.auth.getUser();
-    const userId = userData?.user?.id;
+    const userId = await getAuthenticatedUserId();
     if (!userId) return false;
 
     const updatePayload = {
@@ -439,8 +451,7 @@ export async function deleteTransactionFromSupabase(id: string): Promise<boolean
 export async function fetchCategoryBudgetsFromSupabase(): Promise<CategoryBudget[] | null> {
   if (!supabase) return null;
   try {
-    const { data: userData } = await supabase.auth.getUser();
-    const userId = userData?.user?.id;
+    const userId = await getAuthenticatedUserId();
     if (!userId) return null;
 
     const { data, error } = await supabase
@@ -451,9 +462,9 @@ export async function fetchCategoryBudgetsFromSupabase(): Promise<CategoryBudget
     if (error) return null;
 
     if (data) {
-      return data.map((b: any) => ({
-        id: b.id,
-        category: b.category,
+      return data.map((b: Record<string, unknown>) => ({
+        id: typeof b.id === 'string' ? b.id : undefined,
+        category: typeof b.category === 'string' ? b.category : 'Outros',
         limit: Number(b.limit_amount) || 0,
       }));
     }
@@ -466,8 +477,7 @@ export async function fetchCategoryBudgetsFromSupabase(): Promise<CategoryBudget
 export async function saveCategoryBudgetToSupabase(category: string, limitAmount: number): Promise<boolean> {
   if (!supabase) return false;
   try {
-    const { data: userData } = await supabase.auth.getUser();
-    const userId = userData?.user?.id;
+    const userId = await getAuthenticatedUserId();
     if (!userId) return false;
 
     const payload = {
@@ -489,8 +499,8 @@ export async function saveCategoryBudgetToSupabase(category: string, limitAmount
 
 export type RealtimePayload = {
   eventType: 'INSERT' | 'UPDATE' | 'DELETE';
-  newRecord?: any;
-  oldRecord?: any;
+  newRecord?: Record<string, unknown>;
+  oldRecord?: Record<string, unknown>;
 };
 
 // Helper for Realtime channel subscription with INCREMENTAL updates
@@ -500,11 +510,11 @@ export function subscribeToTransactionsRealtime(
   if (!supabase) return null;
   const channel = supabase
     .channel('public:transactions')
-    .on('postgres_changes', { event: '*', schema: 'public', table: 'transactions' }, (payload: any) => {
+    .on('postgres_changes', { event: '*', schema: 'public', table: 'transactions' }, (payload: Record<string, unknown>) => {
       onIncrementalChange({
-        eventType: payload.eventType,
-        newRecord: payload.new,
-        oldRecord: payload.old,
+        eventType: payload.eventType as 'INSERT' | 'UPDATE' | 'DELETE',
+        newRecord: payload.new as Record<string, unknown> | undefined,
+        oldRecord: payload.old as Record<string, unknown> | undefined,
       });
     })
     .subscribe();

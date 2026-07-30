@@ -104,7 +104,7 @@ export const ReportsView: React.FC<ReportsViewProps> = ({ transactions, user }) 
           {/* Export PDF Button */}
           <button
             onClick={handleExportPDF}
-            className="px-4 py-2.5 bg-gradient-to-r from-purple-600 to-indigo-600 text-white font-bold text-xs rounded-2xl shadow-lg shadow-purple-900/40 hover:opacity-95 active:scale-95 transition-all cursor-pointer flex items-center gap-2"
+            className="px-4 py-2.5 min-h-[44px] bg-gradient-to-r from-purple-600 to-indigo-600 text-white font-bold text-xs rounded-2xl shadow-lg shadow-purple-900/40 hover:opacity-95 active:scale-95 transition-all cursor-pointer flex items-center gap-2 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-purple-500 focus-visible:ring-offset-2 focus-visible:ring-offset-[#0f0c1b]"
             title="Exportar resumo formatado em PDF profissional"
           >
             <span className="material-symbols-outlined text-base">picture_as_pdf</span>
@@ -114,7 +114,7 @@ export const ReportsView: React.FC<ReportsViewProps> = ({ transactions, user }) 
           {/* Export CSV Button */}
           <button
             onClick={handleExportCSV}
-            className="px-4 py-2.5 bg-[#1c1833] border border-purple-500/30 text-purple-200 font-bold text-xs rounded-2xl hover:bg-purple-900/30 hover:text-white transition-all cursor-pointer flex items-center gap-2"
+            className="px-4 py-2.5 min-h-[44px] bg-[#1c1833] border border-purple-500/30 text-purple-200 font-bold text-xs rounded-2xl hover:bg-purple-900/30 hover:text-white transition-all cursor-pointer flex items-center gap-2 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-purple-500 focus-visible:ring-offset-2 focus-visible:ring-offset-[#0f0c1b]"
             title="Exportar planilha em CSV"
           >
             <span className="material-symbols-outlined text-base">file_download</span>

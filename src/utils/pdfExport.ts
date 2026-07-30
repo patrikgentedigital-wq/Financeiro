@@ -155,7 +155,7 @@ export async function generateMonthlyPDFReport({
       margin: { left: 14, right: 14 },
     });
 
-    currentY = (doc as any).lastAutoTable.finalY + 8;
+    currentY = (doc as unknown as { lastAutoTable?: { finalY: number } }).lastAutoTable?.finalY ?? (currentY + 8);
   } else {
     currentY += 8;
   }

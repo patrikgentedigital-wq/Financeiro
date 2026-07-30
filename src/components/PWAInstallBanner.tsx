@@ -40,7 +40,8 @@ export const PWAInstallBanner: React.FC = () => {
     <div className="mb-6 p-4 rounded-3xl glass-card border border-purple-500/30 bg-gradient-to-r from-[#191333] via-[#131024] to-[#1a1238] shadow-2xl relative animate-in fade-in">
       <button
         onClick={handleDismiss}
-        className="absolute top-3 right-3 text-gray-400 hover:text-white p-1 rounded-xl hover:bg-purple-500/10 transition-colors cursor-pointer"
+        aria-label="Fechar"
+        className="absolute top-3 right-3 text-gray-400 hover:text-white min-w-[44px] min-h-[44px] flex items-center justify-center rounded-xl hover:bg-purple-500/10 transition-colors cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-purple-500 focus-visible:ring-offset-2 focus-visible:ring-offset-[#0f0c1b]"
         title="Fechar aviso"
       >
         <span className="material-symbols-outlined text-sm">close</span>
@@ -65,7 +66,7 @@ export const PWAInstallBanner: React.FC = () => {
 
           <button
             onClick={handleInstallClick}
-            className="px-5 py-2.5 rounded-2xl bg-gradient-to-r from-purple-600 to-indigo-600 hover:from-purple-500 hover:to-indigo-500 text-white text-xs font-bold shadow-lg shadow-purple-900/40 active:scale-95 transition-all cursor-pointer flex items-center justify-center gap-2 shrink-0"
+            className="px-5 py-2.5 min-h-[44px] rounded-2xl bg-gradient-to-r from-purple-600 to-indigo-600 hover:from-purple-500 hover:to-indigo-500 text-white text-xs font-bold shadow-lg shadow-purple-900/40 active:scale-95 transition-all cursor-pointer flex items-center justify-center gap-2 shrink-0 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-purple-500 focus-visible:ring-offset-2 focus-visible:ring-offset-[#0f0c1b]"
           >
             <span className="material-symbols-outlined text-base">download</span>
             <span>Instalar App</span>

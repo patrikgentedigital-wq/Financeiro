@@ -9,15 +9,21 @@ export type ErrorCategory =
 export interface AppError {
   category: ErrorCategory;
   message: string;
-  originalError?: any;
+  originalError?: unknown;
 }
 
-export function classifyError(error: any): AppError {
+export function classifyError(error: unknown): AppError {
   if (!error) {
     return { category: 'UNKNOWN_ERROR', message: 'Ocorreu um erro desconhecido.' };
   }
 
-  const msg = typeof error === 'string' ? error : error?.message || '';
+  const msg = typeof error === 'string' 
+    ? error 
+    : error instanceof Error 
+      ? error.message 
+      : (error && typeof error === 'object' && 'message' in error) 
+        ? String(error.message) 
+        : '';
 
   if (msg.includes('Failed to fetch') || msg.includes('NetworkError') || msg.includes('ERR_NAME_NOT_RESOLVED')) {
     return {

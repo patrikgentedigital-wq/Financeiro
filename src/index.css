@@ -1,5 +1,33 @@
 @import "tailwindcss";
 
+/* Design Tokens */
+:root {
+  --color-background: #0f0c1b;
+  --color-surface: #1c1833;
+  --color-surface-elevated: #251f42;
+  --color-border: rgba(139, 92, 246, 0.2);
+  --color-border-hover: rgba(168, 85, 247, 0.35);
+  --color-text-primary: #f8fafc;
+  --color-text-secondary: #c4b5fd;
+  --color-text-muted: rgba(196, 181, 253, 0.6);
+  --color-accent: #7c3aed;
+  --color-accent-light: #a855f7;
+  --color-danger: #ef4444;
+  --color-success: #22c55e;
+  --color-info: #6366f1;
+}
+
+html.light {
+  --color-background: #f8f6fc;
+  --color-surface: rgba(255, 255, 255, 0.9);
+  --color-surface-elevated: #ffffff;
+  --color-border: rgba(124, 58, 237, 0.15);
+  --color-border-hover: rgba(124, 58, 237, 0.3);
+  --color-text-primary: #0f172a;
+  --color-text-secondary: #4c1d95;
+  --color-text-muted: rgba(15, 23, 42, 0.5);
+}
+
 @layer base {
   body {
     font-family: 'Inter', sans-serif;
@@ -81,4 +109,18 @@ html.light .glass-card {
 
 .toast-animate {
   animation: slideInUp 0.3s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+}
+
+/* Acessibilidade: Respeitar preferência de redução de movimento */
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+  
+  .toast-animate {
+    animation: none !important;
+  }
 }
